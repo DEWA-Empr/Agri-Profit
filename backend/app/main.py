@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .models import models, database
 from .api.router import api_router
 
-# Initialize database tables
-models.Base.metadata.create_all(bind=database.engine)
+# Schema is managed by Alembic migrations (applied on container startup).
+# Tests create the schema directly via Base.metadata.create_all (see conftest.py).
 
 app = FastAPI(title="AgriProfit API", version="0.1.0")
 
