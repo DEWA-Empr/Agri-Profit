@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+*.env
+.env.*
+
+# Database
+*.db
+*.sqlite3
+
+# Node / frontend
+node_modules/
+dist/
+.next/
+.nuxt/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker volumes (local mounts)
+postgres_data/
+
+# ML models
+backend/app/ml/models/
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Claude Code local settings (personal overrides)
+.claude/settings.local.json

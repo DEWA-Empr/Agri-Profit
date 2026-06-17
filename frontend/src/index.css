@@ -1,0 +1,37 @@
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
+
+body { 
+  font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+  background-color: #f7f9f4;
+  overflow: hidden;
+  color: #111;
+}
+
+/* Helper classes for states that are hard with pure inline styles */
+.nav-item-hover:hover {
+  background-color: rgba(99, 153, 34, 0.08) !important;
+  color: #97C459 !important;
+}
+
+.scroll-container::-webkit-scrollbar {
+  width: 4px;
+}
+.scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(99, 153, 34, 0.2);
+  border-radius: 10px;
+}
+
+input:focus, select:focus {
+  border-color: #639922 !important;
+}
+
+button:active {
+  transform: scale(0.98);
+}
