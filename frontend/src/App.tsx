@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  BrowserRouter as Router, Routes, Route, NavLink 
+import {
+  BrowserRouter as Router, Routes, Route, NavLink
 } from 'react-router-dom';
-import { 
-  LayoutDashboard, ClipboardList, FileText, Tractor, 
+import {
+  LayoutDashboard, ClipboardList, FileText, Tractor,
   BrainCircuit, Users, MessageSquare, MessageCircle,
-  TrendingUp, TrendingDown, Wallet, Clock, 
-  BarChart3, WifiOff, Plus, Download, ChevronRight, Leaf
+  TrendingUp, TrendingDown, Wallet, Clock,
+  BarChart3, WifiOff, Plus, Download, Leaf
 } from 'lucide-react';
 import axios from 'axios';
+import { liveQuery } from 'dexie';
+import { db } from './lib/db';
+import { flushPendingLogs, registerSyncListener } from './lib/sync';
 
 // --- Types ---
 interface Summary { revenue: number; expenses: number; gross_margin: number; }
@@ -51,8 +54,8 @@ const NavItem: React.FC<{ icon: React.ReactNode, label: string, to: string, badg
   </NavLink>
 );
 
-const MetricCard: React.FC<{ label: string, value: string, trend: string, trendUp: boolean, icon: React.ReactNode, iconBg: string, iconColor: string, trendBg: string, trendColor: string, isRevenue?: boolean }> = 
-({ label, value, trend, trendUp, icon, iconBg, iconColor, trendBg, trendColor, isRevenue }) => (
+const MetricCard: React.FC<{ label: string, value: string, trend: string, icon: React.ReactNode, iconBg: string, iconColor: string, trendBg: string, trendColor: string, isRevenue?: boolean }> =
+({ label, value, trend, icon, iconBg, iconColor, trendBg, trendColor, isRevenue }) => (
   <div style={{
     backgroundColor: isRevenue ? '#f0f7e8' : '#fff',
     borderRadius: '12px',
@@ -68,7 +71,7 @@ const MetricCard: React.FC<{ label: string, value: string, trend: string, trendU
         width: '32px', height: '32px', borderRadius: '9px', backgroundColor: iconBg,
         display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}>
-        <div style={{ color: iconColor, display: 'flex' }}>{React.cloneElement(icon as React.ReactElement, { size: 16 })}</div>
+        <div style={{ color: iconColor, display: 'flex' }}>{React.cloneElement(icon as React.ReactElement<{ size?: number }>, { size: 16 })}</div>
       </div>
       <span style={{
         fontSize: '10px', fontWeight: '700', padding: '3px 8px', borderRadius: '8px',
@@ -85,10 +88,11 @@ const MetricCard: React.FC<{ label: string, value: string, trend: string, trendU
 
 // --- Dashboard ---
 
-const Dashboard: React.FC = () => {
+const Dashboard: React.FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => {
   const [summary, setSummary] = useState<Summary>({ revenue: 0, expenses: 0, gross_margin: 0 });
   const [logs, setLogs] = useState<Log[]>([]);
   const [form, setForm] = useState({ activity_type: 'yield', item: '', amount: '', date: new Date().toISOString().split('T')[0] });
+  const [saveMessage, setSaveMessage] = useState('');
 
   const fetchData = async () => {
     try {
@@ -105,22 +109,38 @@ const Dashboard: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      await axios.post(`${API_BASE}/ledger/logs`, {
-        activity_type: form.activity_type,
+    const clientId = crypto.randomUUID();
+    const payload = {
+      activity_type: form.activity_type,
+      description: form.item,
+      quantity: 1,
+      unit: 'unit',
+      client_id: clientId,
+      financial_data: {
+        amount: parseFloat(form.amount),
+        transaction_type: form.activity_type === 'yield' ? 'credit' : 'debit',
+        category: form.activity_type,
         description: form.item,
-        quantity: 1,
-        unit: 'unit',
-        financial_data: {
-          amount: parseFloat(form.amount),
-          transaction_type: form.activity_type === 'yield' ? 'credit' : 'debit',
-          category: form.activity_type,
-          description: form.item
-        }
-      });
+      },
+    };
+
+    if (!isOnline) {
+      await db.pendingLogs.add({ clientId, payload, status: 'pending', failCount: 0, createdAt: Date.now() });
       setForm({ ...form, item: '', amount: '' });
+      setSaveMessage('Saved offline — will sync when connected.');
+      return;
+    }
+
+    try {
+      await axios.post(`${API_BASE}/ledger/logs`, payload);
+      setForm({ ...form, item: '', amount: '' });
+      setSaveMessage('');
       fetchData();
-    } catch (err) { alert("Error saving."); }
+    } catch {
+      await db.pendingLogs.add({ clientId, payload, status: 'pending', failCount: 0, createdAt: Date.now() });
+      setForm({ ...form, item: '', amount: '' });
+      setSaveMessage('Network error — saved offline. Will retry when connected.');
+    }
   };
 
   const placeholders = [
@@ -137,22 +157,22 @@ const Dashboard: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '11px' }}>
         <MetricCard 
           label="Total Revenue" value={`₦${summary.revenue.toLocaleString()}`} 
-          trend="↑ 12%" trendUp={true} icon={<TrendingUp />} 
+          trend="↑ 12%"icon={<TrendingUp />} 
           iconBg="#dff0c4" iconColor="#3B6D11" trendBg="#e8f5d4" trendColor="#3B6D11" isRevenue={true} 
         />
         <MetricCard 
           label="Total Expenses" value={`₦${summary.expenses.toLocaleString()}`} 
-          trend="↑ 4%" trendUp={false} icon={<TrendingDown />} 
+          trend="↑ 4%"icon={<TrendingDown />} 
           iconBg="#fde8e8" iconColor="#b33333" trendBg="#fde8e8" trendColor="#b33333"
         />
         <MetricCard 
           label="Gross Margin" value={`₦${summary.gross_margin.toLocaleString()}`} 
-          trend="50% rate" trendUp={true} icon={<Wallet />} 
+          trend="50% rate"icon={<Wallet />} 
           iconBg="#ddeeff" iconColor="#185FA5" trendBg="#e8f5d4" trendColor="#3B6D11"
         />
         <MetricCard 
           label="Total Activities" value={logs.length > 0 ? logs.length.toString() : "24"} 
-          trend="+6 this wk" trendUp={true} icon={<ClipboardList />} 
+          trend="+6 this wk"icon={<ClipboardList />} 
           iconBg="#fef3d8" iconColor="#a05c00" trendBg="#fff3e0" trendColor="#a05c00"
         />
       </div>
@@ -270,8 +290,16 @@ const Dashboard: React.FC = () => {
               </div>
               <input type="date" value={form.date} onChange={e => setForm({...form, date: e.target.value})} style={{ width: '100%', padding: '7px 10px', borderRadius: '7px', border: '1px solid #d0d8c8', fontSize: '12px' }} />
               <button type="submit" style={{ backgroundColor: '#3B6D11', color: '#EAF3DE', padding: '10px', borderRadius: '8px', border: 'none', fontWeight: '500', fontSize: '12px', cursor: 'pointer', marginTop: '4px' }}>SAVE RECORD</button>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#f0f7e8', border: '0.5px solid #c8dfa8', padding: '7px 10px', borderRadius: '8px', marginTop: '8px' }}>
-                <span style={{ fontSize: '10px', color: '#3B6D11' }}>⚡ Works offline · syncs when connected</span>
+              <div style={{ backgroundColor: pendingCount > 0 || !isOnline ? 'rgba(160,92,0,0.08)' : '#f0f7e8', border: `0.5px solid ${pendingCount > 0 || !isOnline ? '#d4a843' : '#c8dfa8'}`, padding: '7px 10px', borderRadius: '8px', marginTop: '8px' }}>
+                {saveMessage ? (
+                  <span style={{ fontSize: '10px', color: '#a05c00' }}>{saveMessage}</span>
+                ) : pendingCount > 0 ? (
+                  <span style={{ fontSize: '10px', color: '#a05c00' }}>⏳ {pendingCount} log{pendingCount > 1 ? 's' : ''} pending sync</span>
+                ) : isOnline ? (
+                  <span style={{ fontSize: '10px', color: '#3B6D11' }}>⚡ Online · all logs synced</span>
+                ) : (
+                  <span style={{ fontSize: '10px', color: '#a05c00' }}>📴 Offline · logs will sync when connected</span>
+                )}
               </div>
             </form>
           </div>
@@ -284,6 +312,29 @@ const Dashboard: React.FC = () => {
 // --- App Shell ---
 
 const App: React.FC = () => {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); flushPendingLogs(); };
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    const cleanupSync = registerSyncListener();
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      cleanupSync();
+    };
+  }, []);
+
+  useEffect(() => {
+    const sub = liveQuery(() =>
+      db.pendingLogs.where('status').equals('pending').count()
+    ).subscribe({ next: setPendingCount, error: () => {} });
+    return () => sub.unsubscribe();
+  }, []);
+
   return (
     <Router>
       <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: '#f7f9f4' }}>
@@ -333,6 +384,23 @@ const App: React.FC = () => {
             </div>
           </nav>
 
+          {/* Sync status */}
+          {(!isOnline || pendingCount > 0) && (
+            <div style={{ padding: '10px 18px', borderTop: '0.5px solid rgba(99,153,34,0.12)', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              {!isOnline && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', backgroundColor: 'rgba(160,92,0,0.15)', borderRadius: '6px' }}>
+                  <WifiOff size={11} color="#BA7517" />
+                  <span style={{ color: '#BA7517', fontSize: '10px', fontWeight: '600' }}>Offline</span>
+                </div>
+              )}
+              {pendingCount > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', backgroundColor: 'rgba(160,92,0,0.1)', borderRadius: '6px' }}>
+                  <span style={{ color: '#BA7517', fontSize: '10px' }}>⏳ {pendingCount} pending sync</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Profile */}
           <div style={{ padding: '18px', borderTop: '0.5px solid rgba(99, 153, 34, 0.12)', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#1e3d0a', border: '1.5px solid #3B6D11', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#97C459', fontWeight: '800', fontSize: '11px' }}>AD</div>
@@ -346,7 +414,7 @@ const App: React.FC = () => {
         {/* MAIN AREA */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           
-          <header style={{ height: '60px', background: '#fff', borderBottom: '0.5px solid #e8ede4', padding: '15px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', shrink: 0 }}>
+          <header style={{ height: '60px', background: '#fff', borderBottom: '0.5px solid #e8ede4', padding: '15px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
             <div>
               <h2 style={{ fontSize: '17px', fontWeight: '500', color: '#111', letterSpacing: '-0.3px' }}>Farm Overview</h2>
               <p style={{ fontSize: '11px', color: '#888', marginTop: '2px' }}>Tuesday, 16 June 2026 • Currency in NGN (₦)</p>
@@ -363,7 +431,7 @@ const App: React.FC = () => {
 
           <main style={{ flex: 1, padding: '22px', overflowY: 'auto' }} className="scroll-container">
             <Routes>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<Dashboard isOnline={isOnline} pendingCount={pendingCount} />} />
               <Route path="*" element={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontWeight: '700', fontStyle: 'italic' }}>Module Under Construction</div>} />
             </Routes>
           </main>

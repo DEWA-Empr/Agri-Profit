@@ -3,6 +3,13 @@ from ..models import models
 from ..schemas import schemas
 
 def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
+    if log.client_id:
+        existing = db.query(models.OperationalLog).filter(
+            models.OperationalLog.client_id == log.client_id
+        ).first()
+        if existing:
+            return existing
+
     financial_tx = models.FinancialTransaction(
         amount=log.financial_data.amount,
         transaction_type=log.financial_data.transaction_type,
@@ -19,6 +26,7 @@ def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
         quantity=log.quantity,
         unit=log.unit,
         extra_data=log.extra_data,
+        client_id=log.client_id,
         financial_transaction_id=financial_tx.id
     )
     db.add(db_log)

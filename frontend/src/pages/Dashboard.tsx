@@ -19,7 +19,7 @@ const Dashboard: React.FC = () => {
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       } finally {
-        setLoading(setLoading(false));
+        setLoading(false);
       }
     };
     fetchData();

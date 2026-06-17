@@ -70,6 +70,28 @@ def test_equipment_lifecycle(client):
     assert response.status_code == 200
     assert len(response.json()) == 1
 
+def test_idempotent_log_creation(client):
+    client_id = "test-client-uuid-idempotency-001"
+    payload = {
+        "activity_type": "seed",
+        "description": "Idempotency test",
+        "quantity": 2.0,
+        "unit": "bags",
+        "client_id": client_id,
+        "financial_data": {
+            "amount": 5000.0,
+            "transaction_type": "debit",
+            "category": "seed",
+            "description": "Seed purchase",
+            "tax_category": "Agriculture Inputs"
+        }
+    }
+    r1 = client.post("/api/v1/ledger/logs", json=payload)
+    assert r1.status_code == 200
+    r2 = client.post("/api/v1/ledger/logs", json=payload)
+    assert r2.status_code == 200
+    assert r1.json()["id"] == r2.json()["id"]
+
 def test_invalid_enum_activity(client):
     payload = {
         "activity_type": "invalid_category",

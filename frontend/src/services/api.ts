@@ -11,20 +11,20 @@ const api = axios.create({
 
 export const ledgerService = {
   getLogs: () => api.get('/ledger/logs'),
-  createLog: (data) => api.post('/ledger/logs', data),
+  createLog: (data: unknown) => api.post('/ledger/logs', data),
   getSummary: () => api.get('/ledger/summary'),
   getTransactions: () => api.get('/ledger/transactions'),
 };
 
 export const equipmentService = {
   getEquipment: () => api.get('/equipment/'),
-  createEquipment: (data) => api.post('/equipment/', data),
-  getMaintenance: (id) => api.get(`/equipment/${id}/maintenance`),
-  createMaintenance: (data) => api.post('/equipment/maintenance', data),
+  createEquipment: (data: unknown) => api.post('/equipment/', data),
+  getMaintenance: (id: number | string) => api.get(`/equipment/${id}/maintenance`),
+  createMaintenance: (data: unknown) => api.post('/equipment/maintenance', data),
 };
 
 export const dssService = {
-  predict: (data) => api.post('/dss/predict', data),
+  predict: (data: unknown) => api.post('/dss/predict', data),
   train: () => api.post('/dss/train'),
 };
 

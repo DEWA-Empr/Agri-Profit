@@ -26,6 +26,7 @@ class OperationalLogBase(BaseModel):
     quantity: Optional[float] = None
     unit: Optional[str] = None
     extra_data: Optional[Dict[str, Any]] = None
+    client_id: Optional[str] = None
 
 class OperationalLogCreate(OperationalLogBase):
     financial_data: FinancialTransactionCreate

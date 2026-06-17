@@ -17,6 +17,8 @@ class OperationalLog(Base):
     # Bioprocess parameters or custom data
     extra_data = Column(JSON, nullable=True) # e.g., {"drying_time": 48, "humidity": 12.5}
     
+    client_id = Column(String, unique=True, nullable=True, index=True)
+
     # Link to financial transaction
     financial_transaction_id = Column(Integer, ForeignKey("financial_transactions.id"), nullable=True)
     financial_transaction = relationship("FinancialTransaction", back_populates="operational_log")
