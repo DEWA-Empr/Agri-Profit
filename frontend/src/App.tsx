@@ -8,16 +8,11 @@ import {
   TrendingUp, TrendingDown, Wallet, Clock,
   BarChart3, WifiOff, Plus, Download, Leaf
 } from 'lucide-react';
-import axios from 'axios';
 import { liveQuery } from 'dexie';
 import { db } from './lib/db';
 import { flushPendingLogs, registerSyncListener } from './lib/sync';
-
-// --- Types ---
-interface Summary { revenue: number; expenses: number; gross_margin: number; }
-interface Log { id: number; activity_type: string; description: string; quantity: number; unit: string; timestamp: string; financial_transaction?: { amount: number; transaction_type: 'debit' | 'credit'; }; }
-
-const API_BASE = 'http://localhost:8000/api/v1';
+import { ledgerService } from './lib/apiClient';
+import type { Summary, OperationalLog } from './types/domain';
 
 // --- Components ---
 
@@ -90,15 +85,15 @@ const MetricCard: React.FC<{ label: string, value: string, trend: string, icon: 
 
 const Dashboard: React.FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => {
   const [summary, setSummary] = useState<Summary>({ revenue: 0, expenses: 0, gross_margin: 0 });
-  const [logs, setLogs] = useState<Log[]>([]);
+  const [logs, setLogs] = useState<OperationalLog[]>([]);
   const [form, setForm] = useState({ activity_type: 'yield', item: '', amount: '', date: new Date().toISOString().split('T')[0] });
   const [saveMessage, setSaveMessage] = useState('');
 
   const fetchData = async () => {
     try {
       const [sRes, lRes] = await Promise.all([
-        axios.get(`${API_BASE}/ledger/summary`),
-        axios.get(`${API_BASE}/ledger/logs`)
+        ledgerService.getSummary(),
+        ledgerService.getLogs(),
       ]);
       setSummary(sRes.data);
       setLogs(lRes.data);
@@ -132,7 +127,7 @@ const Dashboard: React.FC<{ isOnline: boolean; pendingCount: number }> = ({ isOn
     }
 
     try {
-      await axios.post(`${API_BASE}/ledger/logs`, payload);
+      await ledgerService.createLog(payload);
       setForm({ ...form, item: '', amount: '' });
       setSaveMessage('');
       fetchData();

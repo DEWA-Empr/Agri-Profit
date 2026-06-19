@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ledgerService } from '../services/api';
+import { ledgerService } from '../lib/apiClient';
 import { Save, AlertCircle } from 'lucide-react';
 
 const LogActivity: React.FC = () => {

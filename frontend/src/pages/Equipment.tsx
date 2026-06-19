@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { equipmentService } from '../services/api';
+import { equipmentService } from '../lib/apiClient';
 import { Tractor, Wrench, Plus, Calendar, Hash } from 'lucide-react';
 
 const Equipment: React.FC = () => {

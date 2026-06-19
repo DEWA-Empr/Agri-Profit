@@ -1,5 +1,8 @@
 import axios from 'axios';
 
+// The single axios instance for the whole app. Components and feature api
+// modules import from here — nothing constructs raw axios calls or hardcodes
+// the base URL (see STRUCTURE.md §3). The base URL is environment-driven.
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 const api = axios.create({
@@ -9,6 +12,9 @@ const api = axios.create({
   },
 });
 
+// NOTE: request/response payloads are typed loosely here for now. Per-method
+// typing against types/domain.ts lands in Phase 4 alongside the feature-page
+// rewrites (the current page components pass loosely-typed form state).
 export const ledgerService = {
   getLogs: () => api.get('/ledger/logs'),
   createLog: (data: unknown) => api.post('/ledger/logs', data),

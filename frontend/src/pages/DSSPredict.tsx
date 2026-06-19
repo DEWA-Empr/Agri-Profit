@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { dssService } from '../services/api';
+import { dssService } from '../lib/apiClient';
 import { BrainCircuit, Play, BarChart3, Info } from 'lucide-react';
 
 const DSSPredict: React.FC = () => {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ledgerService } from '../services/api';
+import { ledgerService } from '../lib/apiClient';
 import { TrendingUp, TrendingDown, Wallet, ClipboardList } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
