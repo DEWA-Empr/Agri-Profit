@@ -1,16 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.router import api_router
+from .core.config import settings
 
 # Schema is managed by Alembic migrations (applied on container startup).
 # Tests create the schema directly via Base.metadata.create_all (see conftest.py).
 
 app = FastAPI(title="AgriProfit API", version="0.1.0")
 
-# Set up CORS
+# Set up CORS — origins are configured per environment (see core/config.py).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
