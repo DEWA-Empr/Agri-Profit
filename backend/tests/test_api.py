@@ -92,6 +92,18 @@ def test_idempotent_log_creation(client):
     assert r2.status_code == 200
     assert r1.json()["id"] == r2.json()["id"]
 
+def test_maintenance_for_missing_equipment_returns_404(client):
+    payload = {"equipment_id": 999999, "description": "Service on a ghost", "cost": 100.0}
+    response = client.post("/api/v1/equipment/maintenance", json=payload)
+    assert response.status_code == 404
+    assert "detail" in response.json()
+
+
+def test_get_maintenance_for_missing_equipment_returns_404(client):
+    response = client.get("/api/v1/equipment/999999/maintenance")
+    assert response.status_code == 404
+
+
 def test_pnl_report_json(client):
     # Earlier tests have added debit transactions; the report should reflect
     # consistent totals regardless of test ordering.
