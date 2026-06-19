@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ...models.database import get_db
 from ...ml import predict, train
-from ...models import models
 
 router = APIRouter(prefix="/dss", tags=["dss"])
 
