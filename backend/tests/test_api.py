@@ -92,6 +92,32 @@ def test_idempotent_log_creation(client):
     assert r2.status_code == 200
     assert r1.json()["id"] == r2.json()["id"]
 
+def test_pnl_report_json(client):
+    # Earlier tests have added debit transactions; the report should reflect
+    # consistent totals regardless of test ordering.
+    response = client.get("/api/v1/reports/pnl")
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data.keys()) == {"revenue", "expenses", "gross_margin", "categories"}
+    assert data["gross_margin"] == data["revenue"] - data["expenses"]
+    # One breakdown row per Activity Category.
+    assert len(data["categories"]) == 7
+    fertilizer = next(c for c in data["categories"] if c["category"] == "fertilizer")
+    assert fertilizer["expenses"] >= 25000.0
+    assert fertilizer["net"] == fertilizer["revenue"] - fertilizer["expenses"]
+
+
+def test_pnl_report_csv(client):
+    response = client.get("/api/v1/reports/pnl.csv")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    body = response.text
+    assert "AgriProfit Profit & Loss Report" in body
+    assert "Category,Revenue (NGN),Expenses (NGN),Net (NGN)" in body
+    assert "Total" in body
+
+
 def test_invalid_enum_activity(client):
     payload = {
         "activity_type": "invalid_category",

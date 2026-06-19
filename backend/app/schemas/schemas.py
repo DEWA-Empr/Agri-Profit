@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 from ..core.enums import Category, TransactionType
 
 # --- Financial Transaction Schemas ---
@@ -52,6 +52,19 @@ class EquipmentCreate(EquipmentBase):
 class Equipment(EquipmentBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
+
+# --- P&L Report Schemas ---
+class PnlCategory(BaseModel):
+    category: str
+    revenue: float
+    expenses: float
+    net: float
+
+class PnlReport(BaseModel):
+    revenue: float
+    expenses: float
+    gross_margin: float
+    categories: List[PnlCategory]
 
 # --- Maintenance Log Schemas ---
 class MaintenanceLogBase(BaseModel):

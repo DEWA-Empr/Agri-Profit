@@ -1,10 +1,9 @@
 # AgriProfit — Project Structure & Conventions
 
-> Status: **PROPOSED** (awaiting approval). This document defines the target
-> architecture for AgriProfit before the remaining modules are built. It is the
-> single source of truth for *where things go* and *what they are named*. When
-> code and this document disagree, update one of them deliberately — never let
-> them silently drift.
+> Status: **ADOPTED** — implemented through Phase 4 (migration complete). This
+> document is the single source of truth for *where things go* and *what they
+> are named*. When code and this document disagree, update one of them
+> deliberately — never let them silently drift.
 >
 > Domain vocabulary is owned by [`CONTEXT.md`](./CONTEXT.md). This document
 > never redefines a domain term; it only says where that term's code lives.

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { PnlReport } from '../types/domain';
 
 // The single axios instance for the whole app. Components and feature api
 // modules import from here — nothing constructs raw axios calls or hardcodes
@@ -32,6 +33,12 @@ export const equipmentService = {
 export const dssService = {
   predict: (data: unknown) => api.post('/dss/predict', data),
   train: () => api.post('/dss/train'),
+};
+
+export const reportsService = {
+  getPnl: () => api.get<PnlReport>('/reports/pnl'),
+  // Direct URL for the CSV download (served with a Content-Disposition header).
+  pnlCsvUrl: () => `${api.defaults.baseURL}/reports/pnl.csv`,
 };
 
 export default api;

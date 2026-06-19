@@ -62,6 +62,21 @@ export interface Summary {
   gross_margin: number;
 }
 
+// Profit & Loss report (GET /reports/pnl).
+export interface PnlCategory {
+  category: Category;
+  revenue: number;
+  expenses: number;
+  net: number;
+}
+
+export interface PnlReport {
+  revenue: number;
+  expenses: number;
+  gross_margin: number;
+  categories: PnlCategory[];
+}
+
 // --- Create payloads (request bodies) ---
 
 export interface FinancialTransactionCreate {
