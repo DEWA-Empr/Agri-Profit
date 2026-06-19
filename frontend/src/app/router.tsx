@@ -1,10 +1,17 @@
 import type { FC, ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard, ClipboardList, FileText, Tractor,
   BrainCircuit, Users, MessageSquare, MessageCircle
 } from 'lucide-react';
 import DashboardPage from '../features/dashboard/DashboardPage';
+import FarmRecordsPage from '../features/farm-records/FarmRecordsPage';
+import ReportsPage from '../features/reports/ReportsPage';
+import EquipmentPage from '../features/equipment/EquipmentPage';
+import DSSPredictPage from '../features/dss/DSSPredictPage';
+import InvestorsPage from '../features/investors/InvestorsPage';
+import UssdPage from '../features/messaging/UssdPage';
+import WhatsappPage from '../features/messaging/WhatsappPage';
 
 // Single source of truth for navigation. The Sidebar renders from this, and the
 // route table below mounts the corresponding pages — so a nav link can never
@@ -48,15 +55,16 @@ export const navSections: NavSection[] = [
   },
 ];
 
-const UnderConstruction: FC = () => (
-  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontWeight: '700', fontStyle: 'italic' }}>
-    Module Under Construction
-  </div>
-);
-
 export const AppRoutes: FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => (
   <Routes>
     <Route path="/" element={<DashboardPage isOnline={isOnline} pendingCount={pendingCount} />} />
-    <Route path="*" element={<UnderConstruction />} />
+    <Route path="/records" element={<FarmRecordsPage />} />
+    <Route path="/reports" element={<ReportsPage />} />
+    <Route path="/equipment" element={<EquipmentPage />} />
+    <Route path="/dss" element={<DSSPredictPage />} />
+    <Route path="/investors" element={<InvestorsPage />} />
+    <Route path="/ussd" element={<UssdPage />} />
+    <Route path="/whatsapp" element={<WhatsappPage />} />
+    <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>
 );
