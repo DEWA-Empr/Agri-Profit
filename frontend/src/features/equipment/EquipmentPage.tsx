@@ -36,7 +36,7 @@ const EquipmentPage = () => {
   };
 
   const input: CSSProperties = { width: '100%', padding: '7px 10px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '12px', marginTop: '4px' };
-  const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: '#555' };
+  const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: colors.labelText };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -57,7 +57,7 @@ const EquipmentPage = () => {
       </div>
 
       {showAddForm && (
-        <form onSubmit={handleAddEquipment} style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', alignItems: 'end' }}>
+        <form onSubmit={handleAddEquipment} className="fade-in-up" style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', alignItems: 'end' }}>
           <div>
             <label style={label}>Name</label>
             <input type="text" required value={newEq.name} onChange={(e) => setNewEq({ ...newEq, name: e.target.value })} style={input} />
@@ -84,7 +84,7 @@ const EquipmentPage = () => {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
           {equipment.map((item) => (
-            <div key={item.id} style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div key={item.id} className="card-interactive" style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ background: colors.primarySurface, padding: '10px', borderRadius: '9px' }}><Tractor size={20} color={colors.primary} /></div>
                 <span style={{ fontSize: '10px', fontWeight: 700, background: colors.divider, color: colors.textMuted, padding: '2px 8px', borderRadius: '6px' }}>ID: {item.id}</span>

@@ -77,12 +77,13 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
     }
   };
 
-  const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: '#555', display: 'block', marginBottom: '4px' };
+  const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: colors.labelText, display: 'block', marginBottom: '4px' };
   const field: CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '12px', boxSizing: 'border-box' };
 
   return (
     <form
       onSubmit={handleSubmit}
+      className="fade-in-up"
       style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}
     >
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>

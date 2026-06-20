@@ -39,6 +39,7 @@ export const colors = {
   textBody: '#333333',
   textMuted: '#888888',
   textFaint: '#aaaaaa',
+  labelText: '#555555', // form field labels
 
   // --- Status ---
   danger: '#c0392b', // expense red (amounts)

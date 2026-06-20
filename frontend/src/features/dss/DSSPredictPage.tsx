@@ -23,7 +23,7 @@ const DSSPredictPage = () => {
   };
 
   const input: CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '12px', marginTop: '4px' };
-  const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: '#555' };
+  const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: colors.labelText };
   const card: CSSProperties = { background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '20px' };
 
   return (

@@ -30,8 +30,64 @@ body {
 
 input:focus, select:focus {
   border-color: #639922 !important;
+  box-shadow: 0 0 0 3px rgba(99, 153, 34, 0.12);
 }
 
+input, select, textarea {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* --- Motion ----------------------------------------------------------------
+   Inline styles can't express :hover, transitions or keyframes, so the app's
+   motion lives here as utility classes (matching the existing helper-class
+   pattern above). All of it is disabled under prefers-reduced-motion. */
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Routed page content animates in on each navigation (keyed by pathname). */
+.fade-in-up { animation: fadeInUp 0.28s ease both; }
+
+/* Modal backdrop + card entrance. */
+.modal-backdrop { animation: fadeIn 0.18s ease both; }
+.modal-card { animation: popIn 0.22s cubic-bezier(0.2, 0.8, 0.25, 1) both; }
+
+/* Cards that lift slightly on hover (equipment, metrics, …). */
+.card-interactive {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(15, 31, 9, 0.08);
+  border-color: rgba(99, 153, 34, 0.35);
+}
+
+/* Subtle, universal button feedback (press already scales below). */
+button {
+  transition: transform 0.12s ease, filter 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
 button:active {
   transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .card-interactive:hover { transform: none; }
 }

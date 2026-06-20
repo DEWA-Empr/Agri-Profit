@@ -14,7 +14,7 @@ interface MetricCardProps {
 }
 
 export const MetricCard: React.FC<MetricCardProps> = ({ label, value, trend, icon, iconBg, iconColor, trendBg, trendColor, isRevenue }) => (
-  <div style={{
+  <div className="card-interactive" style={{
     backgroundColor: isRevenue ? colors.primarySurface : colors.surface,
     borderRadius: '12px',
     padding: '14px',
