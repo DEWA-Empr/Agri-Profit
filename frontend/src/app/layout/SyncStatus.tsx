@@ -3,6 +3,7 @@ import { liveQuery } from 'dexie';
 import { WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { db } from '../../lib/db';
 import { retryFailedLogs } from '../../lib/sync';
+import { colors } from '../../styles/theme';
 
 // Sidebar footer indicator: shown only when offline, when logs are queued, or
 // when logs have failed to sync. Failed logs are surfaced here (with a Retry
@@ -33,20 +34,20 @@ export const SyncStatus: FC<{ isOnline: boolean; pendingCount: number }> = ({ is
     <div style={{ padding: '10px 18px', borderTop: '0.5px solid rgba(99,153,34,0.12)', display: 'flex', flexDirection: 'column', gap: '5px' }}>
       {!isOnline && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', backgroundColor: 'rgba(160,92,0,0.15)', borderRadius: '6px' }}>
-          <WifiOff size={11} color="#BA7517" />
-          <span style={{ color: '#BA7517', fontSize: '10px', fontWeight: '600' }}>Offline</span>
+          <WifiOff size={11} color={colors.warnAccent} />
+          <span style={{ color: colors.warnAccent, fontSize: '10px', fontWeight: '600' }}>Offline</span>
         </div>
       )}
       {pendingCount > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', backgroundColor: 'rgba(160,92,0,0.1)', borderRadius: '6px' }}>
-          <span style={{ color: '#BA7517', fontSize: '10px' }}>⏳ {pendingCount} pending sync</span>
+          <span style={{ color: colors.warnAccent, fontSize: '10px' }}>⏳ {pendingCount} pending sync</span>
         </div>
       )}
       {failedCount > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', padding: '5px 8px', backgroundColor: 'rgba(193,52,52,0.12)', borderRadius: '6px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <AlertTriangle size={11} color="#C13434" />
-            <span style={{ color: '#C13434', fontSize: '10px', fontWeight: '600' }}>{failedCount} failed to sync</span>
+            <AlertTriangle size={11} color={colors.dangerStrong} />
+            <span style={{ color: colors.dangerStrong, fontSize: '10px', fontWeight: '600' }}>{failedCount} failed to sync</span>
           </div>
           <button
             onClick={onRetry}
@@ -54,7 +55,7 @@ export const SyncStatus: FC<{ isOnline: boolean; pendingCount: number }> = ({ is
             title={isOnline ? 'Retry failed logs' : 'Reconnect to retry'}
             style={{
               display: 'flex', alignItems: 'center', gap: '4px', border: 'none', cursor: retrying || !isOnline ? 'default' : 'pointer',
-              background: 'transparent', color: '#C13434', fontSize: '10px', fontWeight: '700', padding: 0, opacity: retrying || !isOnline ? 0.5 : 1,
+              background: 'transparent', color: colors.dangerStrong, fontSize: '10px', fontWeight: '700', padding: 0, opacity: retrying || !isOnline ? 0.5 : 1,
             }}
           >
             <RefreshCw size={10} /> Retry

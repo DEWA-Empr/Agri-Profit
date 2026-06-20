@@ -2,10 +2,11 @@ import type { FC } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { AppRoutes } from '../router';
+import { colors } from '../../styles/theme';
 
 // The single application frame: sidebar + header + routed main content.
 export const AppShell: FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => (
-  <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: '#f7f9f4' }}>
+  <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', backgroundColor: colors.appBg }}>
     <Sidebar isOnline={isOnline} pendingCount={pendingCount} />
 
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

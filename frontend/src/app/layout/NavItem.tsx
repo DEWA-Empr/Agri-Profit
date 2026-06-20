@@ -1,5 +1,6 @@
 import type { FC, ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { colors } from '../../styles/theme';
 
 // A single sidebar navigation link with active styling and an optional badge.
 export const NavItem: FC<{ icon: ReactNode; label: string; to: string; badge?: string }> = ({ icon, label, to, badge }) => (
@@ -16,10 +17,10 @@ export const NavItem: FC<{ icon: ReactNode; label: string; to: string; badge?: s
       transition: 'all 0.2s',
       position: 'relative',
       backgroundColor: isActive ? 'rgba(99, 153, 34, 0.12)' : 'transparent',
-      color: isActive ? '#C0DD97' : '#4a7a1a',
+      color: isActive ? colors.primaryTint : colors.sidebarText,
       fontWeight: isActive ? '700' : '500',
       borderRadius: isActive ? '0 3px 3px 0' : '0',
-      borderLeft: isActive ? '3px solid #639922' : '3px solid transparent',
+      borderLeft: isActive ? `3px solid ${colors.primary}` : '3px solid transparent',
     })}
   >
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -28,7 +29,7 @@ export const NavItem: FC<{ icon: ReactNode; label: string; to: string; badge?: s
     </div>
     {badge && (
       <span style={{
-        backgroundColor: 'rgba(99, 153, 34, 0.2)', color: '#97C459', fontSize: '9px', fontWeight: '800',
+        backgroundColor: 'rgba(99, 153, 34, 0.2)', color: colors.primaryLight, fontSize: '9px', fontWeight: '800',
         padding: '2px 7px', borderRadius: '10px'
       }}>{badge}</span>
     )}

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, Wallet, ClipboardList } from 'lucide-react';
 import { ledgerService } from '../../lib/apiClient';
 import type { Summary, OperationalLog } from '../../types/domain';
+import { colors } from '../../styles/theme';
 import { MetricCard } from './components/MetricCard';
 import { PnlChart } from './components/PnlChart';
 import { RecentActivities } from './components/RecentActivities';
@@ -33,22 +34,22 @@ const DashboardPage: React.FC<{ isOnline: boolean; pendingCount: number }> = ({ 
         <MetricCard
           label="Total Revenue" value={`₦${summary.revenue.toLocaleString()}`}
           trend="↑ 12%" icon={<TrendingUp />}
-          iconBg="#dff0c4" iconColor="#3B6D11" trendBg="#e8f5d4" trendColor="#3B6D11" isRevenue
+          iconBg="#dff0c4" iconColor={colors.primaryDark} trendBg="#e8f5d4" trendColor={colors.primaryDark} isRevenue
         />
         <MetricCard
           label="Total Expenses" value={`₦${summary.expenses.toLocaleString()}`}
           trend="↑ 4%" icon={<TrendingDown />}
-          iconBg="#fde8e8" iconColor="#b33333" trendBg="#fde8e8" trendColor="#b33333"
+          iconBg="#fde8e8" iconColor={colors.dangerAlt} trendBg="#fde8e8" trendColor={colors.dangerAlt}
         />
         <MetricCard
           label="Gross Margin" value={`₦${summary.gross_margin.toLocaleString()}`}
           trend="50% rate" icon={<Wallet />}
-          iconBg="#ddeeff" iconColor="#185FA5" trendBg="#e8f5d4" trendColor="#3B6D11"
+          iconBg="#ddeeff" iconColor={colors.info} trendBg="#e8f5d4" trendColor={colors.primaryDark}
         />
         <MetricCard
           label="Total Activities" value={logs.length > 0 ? logs.length.toString() : '24'}
           trend="+6 this wk" icon={<ClipboardList />}
-          iconBg="#fef3d8" iconColor="#a05c00" trendBg="#fff3e0" trendColor="#a05c00"
+          iconBg="#fef3d8" iconColor={colors.warn} trendBg="#fff3e0" trendColor={colors.warn}
         />
       </div>
 

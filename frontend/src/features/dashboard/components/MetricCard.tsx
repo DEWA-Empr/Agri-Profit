@@ -1,4 +1,5 @@
 import React from 'react';
+import { colors } from '../../../styles/theme';
 
 interface MetricCardProps {
   label: string;
@@ -14,10 +15,10 @@ interface MetricCardProps {
 
 export const MetricCard: React.FC<MetricCardProps> = ({ label, value, trend, icon, iconBg, iconColor, trendBg, trendColor, isRevenue }) => (
   <div style={{
-    backgroundColor: isRevenue ? '#f0f7e8' : '#fff',
+    backgroundColor: isRevenue ? colors.primarySurface : colors.surface,
     borderRadius: '12px',
     padding: '14px',
-    border: isRevenue ? '0.5px solid #c8dfa8' : '0.5px solid #e8ede4',
+    border: isRevenue ? `0.5px solid ${colors.primaryBorderTint}` : `0.5px solid ${colors.border}`,
     display: 'flex',
     flexDirection: 'column',
     flex: 1,
@@ -36,9 +37,9 @@ export const MetricCard: React.FC<MetricCardProps> = ({ label, value, trend, ico
       }}>{trend}</span>
     </div>
     <p style={{
-      fontSize: '22px', fontWeight: '500', color: isRevenue ? '#27500A' : '#111',
+      fontSize: '22px', fontWeight: '500', color: isRevenue ? colors.primaryDarker : colors.textStrong,
       marginTop: '12px', letterSpacing: '-0.5px'
     }}>{value}</p>
-    <p style={{ fontSize: '11px', color: '#888', marginTop: '3px' }}>{label}</p>
+    <p style={{ fontSize: '11px', color: colors.textMuted, marginTop: '3px' }}>{label}</p>
   </div>
 );
