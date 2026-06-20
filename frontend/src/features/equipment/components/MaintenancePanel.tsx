@@ -58,13 +58,12 @@ export const MaintenancePanel = ({ equipment, onClose }: { equipment: Equipment;
   return (
     <div
       onClick={onClose}
-      className="modal-backdrop"
-      style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15,31,9,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '20px' }}
+      style={{ position: 'fixed', inset: 0, backgroundColor: 'transparent', display: 'flex', justifyContent: 'flex-end', zIndex: 50 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="modal-card"
-        style={{ width: '100%', maxWidth: '520px', maxHeight: '85vh', background: colors.surface, borderRadius: '14px', border: `0.5px solid ${colors.border}`, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}
+        className="drawer-panel"
+        style={{ width: '420px', maxWidth: '90vw', height: '100%', background: colors.surface, borderLeft: `1px solid ${colors.border}`, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '-24px 0 60px -12px rgba(15,31,9,0.28)' }}
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '18px 20px', borderBottom: `0.5px solid ${colors.border}` }}>
