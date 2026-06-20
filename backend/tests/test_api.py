@@ -32,12 +32,12 @@ def test_get_summary(client):
     assert data["expenses"] == 25000.0
     assert data["gross_margin"] == -25000.0
 
-def test_dss_predict(client):
+def test_dss_predict_without_model_returns_503(client):
     payload = {"features": [1, 2, 3]}
     response = client.post("/api/v1/dss/predict", json=payload)
-    assert response.status_code == 200
-    # Since model doesn't exist yet, it should return error from our placeholder
-    assert "error" in response.json()
+    # No model is trained in the test environment, so the engine is unavailable.
+    assert response.status_code == 503
+    assert "detail" in response.json()
 
 def test_equipment_lifecycle(client):
     # 1. Create equipment

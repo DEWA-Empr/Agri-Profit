@@ -2,6 +2,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..models import models
 from ..schemas import schemas
+from . import reports_service
 
 
 def _find_by_client_id(db: Session, client_id: str):
@@ -59,13 +60,11 @@ def get_financial_transactions(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.FinancialTransaction).offset(skip).limit(limit).all()
 
 def calculate_gross_margin(db: Session):
-    # Simplified calculation: Total revenue (credit) - Total expenses (debit)
-    revenue = db.query(models.FinancialTransaction).filter(
-        models.FinancialTransaction.transaction_type == models.TransactionType.CREDIT
-    ).with_entities(models.func.sum(models.FinancialTransaction.amount)).scalar() or 0.0
-    
-    expenses = db.query(models.FinancialTransaction).filter(
-        models.FinancialTransaction.transaction_type == models.TransactionType.DEBIT
-    ).with_entities(models.func.sum(models.FinancialTransaction.amount)).scalar() or 0.0
-    
-    return {"revenue": revenue, "expenses": expenses, "gross_margin": revenue - expenses}
+    # The P&L report is the single source of truth for revenue/expenses/margin;
+    # the summary is just its top-line totals (without the category breakdown).
+    report = reports_service.get_pnl_report(db)
+    return {
+        "revenue": report["revenue"],
+        "expenses": report["expenses"],
+        "gross_margin": report["gross_margin"],
+    }

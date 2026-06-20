@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { db } from '../../../lib/db';
 import { ledgerService } from '../../../lib/apiClient';
+import type { Category, OperationalLogCreate } from '../../../types/domain';
 
 interface QuickLogFormProps {
   isOnline: boolean;
@@ -12,13 +13,15 @@ interface QuickLogFormProps {
 // Offline-aware: when disconnected (or on a network error) the entry is queued
 // in IndexedDB with a client_id idempotency key and synced later.
 export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCount, onSaved }) => {
-  const [form, setForm] = useState({ activity_type: 'yield', item: '', amount: '', date: new Date().toISOString().split('T')[0] });
+  const [form, setForm] = useState<{ activity_type: Category; item: string; amount: string; date: string }>(
+    { activity_type: 'yield', item: '', amount: '', date: new Date().toISOString().split('T')[0] }
+  );
   const [saveMessage, setSaveMessage] = useState('');
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const clientId = crypto.randomUUID();
-    const payload = {
+    const payload: OperationalLogCreate = {
       activity_type: form.activity_type,
       description: form.item,
       quantity: 1,
@@ -55,7 +58,7 @@ export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCou
     <div style={{ background: '#fff', borderRadius: '12px', border: '0.5px solid #e8ede4', padding: '16px', flex: 0 }}>
       <h3 style={{ fontSize: '12px', fontWeight: '700', marginBottom: '16px', color: '#222' }}>QUICK LOG ACTIVITY</h3>
       <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <select value={form.activity_type} onChange={e => setForm({ ...form, activity_type: e.target.value })} style={{ width: '100%', padding: '7px 10px', borderRadius: '7px', border: '1px solid #d0d8c8', fontSize: '12px' }}>
+        <select value={form.activity_type} onChange={e => setForm({ ...form, activity_type: e.target.value as Category })} style={{ width: '100%', padding: '7px 10px', borderRadius: '7px', border: '1px solid #d0d8c8', fontSize: '12px' }}>
           <option value="yield">Crop Harvest / Sale</option>
           <option value="fertilizer">Fertilizer Application</option>
           <option value="seed">Seed Purchase</option>

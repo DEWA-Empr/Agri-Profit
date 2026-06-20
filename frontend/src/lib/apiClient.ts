@@ -1,5 +1,16 @@
 import axios from 'axios';
-import type { PnlReport, MonthlyPnlPoint } from '../types/domain';
+import type {
+  OperationalLog,
+  OperationalLogCreate,
+  FinancialTransaction,
+  Summary,
+  Equipment,
+  EquipmentCreate,
+  MaintenanceLog,
+  MaintenanceLogCreate,
+  PnlReport,
+  MonthlyPnlPoint,
+} from '../types/domain';
 
 // The single axios instance for the whole app. Components and feature api
 // modules import from here — nothing constructs raw axios calls or hardcodes
@@ -13,25 +24,31 @@ const api = axios.create({
   },
 });
 
-// NOTE: request/response payloads are typed loosely here for now. Per-method
-// typing against types/domain.ts lands in Phase 4 alongside the feature-page
-// rewrites (the current page components pass loosely-typed form state).
+// Request/response payloads are typed against types/domain.ts — the shared
+// mirror of the backend Pydantic schemas (STRUCTURE.md §5).
 export const ledgerService = {
-  getLogs: () => api.get('/ledger/logs'),
-  createLog: (data: unknown) => api.post('/ledger/logs', data),
-  getSummary: () => api.get('/ledger/summary'),
-  getTransactions: () => api.get('/ledger/transactions'),
+  getLogs: () => api.get<OperationalLog[]>('/ledger/logs'),
+  createLog: (data: OperationalLogCreate) => api.post<OperationalLog>('/ledger/logs', data),
+  getSummary: () => api.get<Summary>('/ledger/summary'),
+  getTransactions: () => api.get<FinancialTransaction[]>('/ledger/transactions'),
 };
 
 export const equipmentService = {
-  getEquipment: () => api.get('/equipment/'),
-  createEquipment: (data: unknown) => api.post('/equipment/', data),
-  getMaintenance: (id: number | string) => api.get(`/equipment/${id}/maintenance`),
-  createMaintenance: (data: unknown) => api.post('/equipment/maintenance', data),
+  getEquipment: () => api.get<Equipment[]>('/equipment/'),
+  createEquipment: (data: EquipmentCreate) => api.post<Equipment>('/equipment/', data),
+  getMaintenance: (id: number | string) => api.get<MaintenanceLog[]>(`/equipment/${id}/maintenance`),
+  createMaintenance: (data: MaintenanceLogCreate) => api.post<MaintenanceLog>('/equipment/maintenance', data),
 };
 
+// The DSS model output shape (a prediction string, or an error/detail message).
+export interface DssPrediction {
+  prediction?: string;
+  error?: string;
+  detail?: string;
+}
+
 export const dssService = {
-  predict: (data: unknown) => api.post('/dss/predict', data),
+  predict: (data: Record<string, number>) => api.post<DssPrediction>('/dss/predict', data),
   train: () => api.post('/dss/train'),
 };
 

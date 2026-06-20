@@ -1,9 +1,10 @@
 import Dexie, { type Table } from 'dexie';
+import type { OperationalLogCreate } from '../types/domain';
 
 export interface PendingLog {
   id?: number;
   clientId: string;
-  payload: Record<string, unknown>;
+  payload: OperationalLogCreate;
   status: 'pending' | 'failed';
   failCount: number;
   createdAt: number;
