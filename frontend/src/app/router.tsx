@@ -58,7 +58,7 @@ export const navSections: NavSection[] = [
 export const AppRoutes: FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => (
   <Routes>
     <Route path="/" element={<DashboardPage isOnline={isOnline} pendingCount={pendingCount} />} />
-    <Route path="/records" element={<FarmRecordsPage />} />
+    <Route path="/records" element={<FarmRecordsPage isOnline={isOnline} />} />
     <Route path="/reports" element={<ReportsPage />} />
     <Route path="/equipment" element={<EquipmentPage />} />
     <Route path="/dss" element={<DSSPredictPage />} />

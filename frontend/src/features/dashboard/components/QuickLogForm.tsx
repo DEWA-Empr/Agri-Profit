@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { db } from '../../../lib/db';
-import { ledgerService } from '../../../lib/apiClient';
+import { saveOperationalLog } from '../../../lib/logs';
 import type { Category, OperationalLogCreate } from '../../../types/domain';
 import { colors } from '../../../styles/theme';
 
@@ -21,13 +20,11 @@ export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCou
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clientId = crypto.randomUUID();
-    const payload: OperationalLogCreate = {
+    const payload: Omit<OperationalLogCreate, 'client_id'> = {
       activity_type: form.activity_type,
       description: form.item,
       quantity: 1,
       unit: 'unit',
-      client_id: clientId,
       financial_data: {
         amount: parseFloat(form.amount),
         transaction_type: form.activity_type === 'yield' ? 'credit' : 'debit',
@@ -36,21 +33,14 @@ export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCou
       },
     };
 
-    if (!isOnline) {
-      await db.pendingLogs.add({ clientId, payload, status: 'pending', failCount: 0, createdAt: Date.now() });
-      setForm({ ...form, item: '', amount: '' });
-      setSaveMessage('Saved offline — will sync when connected.');
-      return;
-    }
-
-    try {
-      await ledgerService.createLog(payload);
-      setForm({ ...form, item: '', amount: '' });
+    const result = await saveOperationalLog(payload, isOnline);
+    setForm({ ...form, item: '', amount: '' });
+    if (result === 'saved') {
       setSaveMessage('');
       onSaved();
-    } catch {
-      await db.pendingLogs.add({ clientId, payload, status: 'pending', failCount: 0, createdAt: Date.now() });
-      setForm({ ...form, item: '', amount: '' });
+    } else if (result === 'offline') {
+      setSaveMessage('Saved offline — will sync when connected.');
+    } else {
       setSaveMessage('Network error — saved offline. Will retry when connected.');
     }
   };
