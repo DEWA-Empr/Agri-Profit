@@ -1,12 +1,19 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..models import models
 from ..schemas import schemas
 
+
+def _find_by_client_id(db: Session, client_id: str):
+    return db.query(models.OperationalLog).filter(
+        models.OperationalLog.client_id == client_id
+    ).first()
+
+
 def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
+    # Fast path: this client_id was already persisted (a retried offline log).
     if log.client_id:
-        existing = db.query(models.OperationalLog).filter(
-            models.OperationalLog.client_id == log.client_id
-        ).first()
+        existing = _find_by_client_id(db, log.client_id)
         if existing:
             return existing
 
@@ -30,7 +37,18 @@ def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
         financial_transaction_id=financial_tx.id
     )
     db.add(db_log)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # A concurrent request with the same client_id won the race and the
+        # unique index rejected this insert. Treat it as the same idempotent
+        # outcome and return the row the winner created (200, not 500).
+        db.rollback()
+        if log.client_id:
+            existing = _find_by_client_id(db, log.client_id)
+            if existing:
+                return existing
+        raise
     db.refresh(db_log)
     return db_log
 
