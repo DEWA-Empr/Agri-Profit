@@ -1,3 +1,22 @@
+def _post_log(client, *, activity_type, amount, transaction_type, category=None, client_id=None):
+    """Create an operational log with its paired financial transaction."""
+    payload = {
+        "activity_type": activity_type,
+        "description": f"{activity_type} entry",
+        "quantity": 1.0,
+        "unit": "unit",
+        "financial_data": {
+            "amount": amount,
+            "transaction_type": transaction_type,
+            "category": category or activity_type,
+            "description": f"{activity_type} tx",
+        },
+    }
+    if client_id is not None:
+        payload["client_id"] = client_id
+    return client.post("/api/v1/ledger/logs", json=payload)
+
+
 def test_read_main(client):
     response = client.get("/")
     assert response.status_code == 200
@@ -25,12 +44,16 @@ def test_create_log_with_financials(client):
     assert data["financial_transaction"]["amount"] == 25000.0
 
 def test_get_summary(client):
-    # This assumes previous test added a debit
+    # Seed a known debit and credit, then assert exact totals (self-contained).
+    assert _post_log(client, activity_type="fertilizer", amount=25000.0, transaction_type="debit").status_code == 200
+    assert _post_log(client, activity_type="yield", amount=40000.0, transaction_type="credit").status_code == 200
+
     response = client.get("/api/v1/ledger/summary")
     assert response.status_code == 200
     data = response.json()
+    assert data["revenue"] == 40000.0
     assert data["expenses"] == 25000.0
-    assert data["gross_margin"] == -25000.0
+    assert data["gross_margin"] == 15000.0
 
 def test_dss_predict_without_model_returns_503(client):
     payload = {"features": [1, 2, 3]}
@@ -105,17 +128,21 @@ def test_get_maintenance_for_missing_equipment_returns_404(client):
 
 
 def test_pnl_report_json(client):
-    # Earlier tests have added debit transactions; the report should reflect
-    # consistent totals regardless of test ordering.
+    # Seed a fertilizer expense and a yield sale, then assert exact figures.
+    _post_log(client, activity_type="fertilizer", amount=25000.0, transaction_type="debit")
+    _post_log(client, activity_type="yield", amount=40000.0, transaction_type="credit")
+
     response = client.get("/api/v1/reports/pnl")
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"revenue", "expenses", "gross_margin", "categories"}
-    assert data["gross_margin"] == data["revenue"] - data["expenses"]
+    assert data["revenue"] == 40000.0
+    assert data["expenses"] == 25000.0
+    assert data["gross_margin"] == 15000.0
     # One breakdown row per Activity Category.
     assert len(data["categories"]) == 7
     fertilizer = next(c for c in data["categories"] if c["category"] == "fertilizer")
-    assert fertilizer["expenses"] >= 25000.0
+    assert fertilizer["expenses"] == 25000.0
     assert fertilizer["net"] == fertilizer["revenue"] - fertilizer["expenses"]
 
 
