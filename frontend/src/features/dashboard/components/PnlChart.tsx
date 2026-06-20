@@ -1,35 +1,52 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { reportsService } from '../../../lib/apiClient';
+import type { MonthlyPnlPoint } from '../../../types/domain';
 
-// Monthly revenue/expense overview. Bars are placeholder figures for now; this
-// is the component that the P&L module (Phase 4) will feed with real data.
-export const PnlChart: React.FC = () => (
-  <div style={{ background: '#fff', borderRadius: '12px', border: '0.5px solid #e8ede4', padding: '20px' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <BarChart3 size={18} color="#639922" />
-        <h3 style={{ fontSize: '12px', fontWeight: '600' }}>Monthly P&L overview</h3>
-      </div>
-      <a href="#" style={{ fontSize: '11px', color: '#639922', fontWeight: '700', textDecoration: 'none' }}>See full report →</a>
-    </div>
+const naira = (n: number) => `₦${Number(n).toLocaleString()}`;
 
-    <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', height: '112px', padding: '0 10px' }}>
-      {[
-        { r: 70, e: 45 }, { r: 87, e: 56 }, { r: 62, e: 41 },
-        { r: 101, e: 64 }, { r: 77, e: 52 }, { r: 112, e: 62 }
-      ].map((h, i) => (
-        <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-          <div style={{ display: 'flex', gap: '2px', alignItems: 'end' }}>
-            <div style={{ width: '8px', height: `${h.r}px`, backgroundColor: '#639922', borderRadius: '1px 1px 0 0' }} />
-            <div style={{ width: '8px', height: `${h.e}px`, backgroundColor: '#c0dd97', borderRadius: '1px 1px 0 0' }} />
-          </div>
-          <span style={{ fontSize: '9px', color: '#aaa', marginTop: '10px', fontWeight: '500' }}>{['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'][i]}</span>
+// Monthly revenue vs. expenses, from GET /reports/pnl/monthly (real ledger data).
+export const PnlChart = () => {
+  const [data, setData] = useState<MonthlyPnlPoint[]>([]);
+
+  useEffect(() => {
+    reportsService.getMonthlyPnl()
+      .then((res) => setData(res.data))
+      .catch((err) => console.error(err));
+  }, []);
+
+  return (
+    <div style={{ background: '#fff', borderRadius: '12px', border: '0.5px solid #e8ede4', padding: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <BarChart3 size={18} color="#639922" />
+          <h3 style={{ fontSize: '12px', fontWeight: '600' }}>Monthly P&L overview</h3>
         </div>
-      ))}
+        <Link to="/reports" style={{ fontSize: '11px', color: '#639922', fontWeight: '700', textDecoration: 'none' }}>See full report →</Link>
+      </div>
+
+      <div style={{ height: '180px', width: '100%' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} barGap={2} barCategoryGap="28%" margin={{ top: 6, right: 4, bottom: 0, left: 4 }}>
+            <CartesianGrid vertical={false} stroke="#f2f2f2" />
+            <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#aaa' }} axisLine={false} tickLine={false} />
+            <Tooltip
+              cursor={{ fill: 'rgba(99,153,34,0.06)' }}
+              formatter={(value) => naira(Number(value))}
+              contentStyle={{ fontSize: '11px', borderRadius: '8px', border: '0.5px solid #e8ede4', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+            />
+            <Bar dataKey="revenue" name="Revenue" fill="#639922" radius={[2, 2, 0, 0]} maxBarSize={14} />
+            <Bar dataKey="expenses" name="Expenses" fill="#c0dd97" radius={[2, 2, 0, 0]} maxBarSize={14} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#888' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#639922' }} /> Revenue</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#888' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#c0dd97' }} /> Expenses</div>
+      </div>
     </div>
-    <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '20px' }}>
-       <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#888' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#639922' }} /> Revenue</div>
-       <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', color: '#888' }}><div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#c0dd97' }} /> Expenses</div>
-    </div>
-  </div>
-);
+  );
+};

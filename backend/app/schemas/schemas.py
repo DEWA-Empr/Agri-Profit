@@ -66,6 +66,11 @@ class PnlReport(BaseModel):
     gross_margin: float
     categories: List[PnlCategory]
 
+class MonthlyPnlPoint(BaseModel):
+    month: str
+    revenue: float
+    expenses: float
+
 # --- Maintenance Log Schemas ---
 class MaintenanceLogBase(BaseModel):
     equipment_id: int

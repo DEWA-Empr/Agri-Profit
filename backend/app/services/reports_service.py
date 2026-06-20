@@ -1,3 +1,4 @@
+import calendar
 import csv
 import io
 from datetime import datetime, timezone
@@ -58,6 +59,53 @@ def get_pnl_report(db: Session) -> dict:
         "gross_margin": revenue_total - expenses_total,
         "categories": categories,
     }
+
+
+def get_monthly_pnl(db: Session, months: int = 6) -> list[dict]:
+    """Revenue and expenses aggregated per month for the last `months` months.
+
+    Aggregated in Python (not SQL) so it works identically on SQLite and
+    Postgres without dialect-specific date functions. Months with no activity
+    are returned as zeros so the chart always shows a full window.
+    """
+    now = datetime.now(timezone.utc)
+    year, month = now.year, now.month
+    window: list[tuple[int, int]] = []
+    for _ in range(months):
+        window.append((year, month))
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    window.reverse()
+
+    buckets = {ym: {"revenue": 0.0, "expenses": 0.0} for ym in window}
+
+    rows = db.query(
+        models.FinancialTransaction.timestamp,
+        models.FinancialTransaction.transaction_type,
+        models.FinancialTransaction.amount,
+    ).all()
+
+    for timestamp, tx_type, amount in rows:
+        if timestamp is None:
+            continue
+        key = (timestamp.year, timestamp.month)
+        if key not in buckets:
+            continue
+        if tx_type == TransactionType.CREDIT:
+            buckets[key]["revenue"] += float(amount or 0.0)
+        else:
+            buckets[key]["expenses"] += float(amount or 0.0)
+
+    return [
+        {
+            "month": calendar.month_abbr[m],
+            "revenue": buckets[(y, m)]["revenue"],
+            "expenses": buckets[(y, m)]["expenses"],
+        }
+        for (y, m) in window
+    ]
 
 
 def generate_pnl_csv(db: Session) -> str:

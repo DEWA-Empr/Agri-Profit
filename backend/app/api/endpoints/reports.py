@@ -1,3 +1,5 @@
+from typing import List
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -12,6 +14,11 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 @router.get("/pnl", response_model=schemas.PnlReport)
 def get_pnl(db: Session = Depends(get_db)):
     return reports_service.get_pnl_report(db)
+
+
+@router.get("/pnl/monthly", response_model=List[schemas.MonthlyPnlPoint])
+def get_monthly_pnl(db: Session = Depends(get_db)):
+    return reports_service.get_monthly_pnl(db)
 
 
 @router.get("/pnl.csv")

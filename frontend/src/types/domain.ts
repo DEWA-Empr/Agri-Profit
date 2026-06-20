@@ -77,6 +77,13 @@ export interface PnlReport {
   categories: PnlCategory[];
 }
 
+// One month of the trend (GET /reports/pnl/monthly).
+export interface MonthlyPnlPoint {
+  month: string;
+  revenue: number;
+  expenses: number;
+}
+
 // --- Create payloads (request bodies) ---
 
 export interface FinancialTransactionCreate {

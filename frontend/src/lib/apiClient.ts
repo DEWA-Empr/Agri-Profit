@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { PnlReport } from '../types/domain';
+import type { PnlReport, MonthlyPnlPoint } from '../types/domain';
 
 // The single axios instance for the whole app. Components and feature api
 // modules import from here — nothing constructs raw axios calls or hardcodes
@@ -37,6 +37,7 @@ export const dssService = {
 
 export const reportsService = {
   getPnl: () => api.get<PnlReport>('/reports/pnl'),
+  getMonthlyPnl: () => api.get<MonthlyPnlPoint[]>('/reports/pnl/monthly'),
   // Direct URL for the CSV download (served with a Content-Disposition header).
   pnlCsvUrl: () => `${api.defaults.baseURL}/reports/pnl.csv`,
 };

@@ -119,6 +119,15 @@ def test_pnl_report_json(client):
     assert fertilizer["net"] == fertilizer["revenue"] - fertilizer["expenses"]
 
 
+def test_pnl_monthly(client):
+    response = client.get("/api/v1/reports/pnl/monthly")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 6
+    for point in data:
+        assert set(point.keys()) == {"month", "revenue", "expenses"}
+
+
 def test_pnl_report_csv(client):
     response = client.get("/api/v1/reports/pnl.csv")
     assert response.status_code == 200
