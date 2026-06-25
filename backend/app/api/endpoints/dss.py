@@ -1,26 +1,36 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from ...models.database import get_db
+import json
+import os
+
+from fastapi import APIRouter
+
 from ...ml import predict, train
+from ...schemas import schemas
 
 router = APIRouter(prefix="/dss", tags=["dss"])
 
-@router.post("/predict")
-def get_prediction(data: dict):
+
+@router.post("/predict", response_model=schemas.DSSPredictResponse)
+def get_prediction(payload: schemas.DSSPredictRequest):
+    """Predict crop yield (t/ha) from agronomic inputs.
+
+    Inputs are validated against the model's training bounds (422 on failure);
+    a 503 is returned if no model has been trained yet.
     """
-    Endpoint for the Predictive DSS Engine.
-    Data should contain features for yield prediction.
-    """
-    prediction = predict.predict_yield(data)
-    return prediction
+    return predict.predict_yield(payload.model_dump())
+
 
 @router.post("/train")
-def trigger_training(db: Session = Depends(get_db)):
-    """
-    Trigger model training using historical data from the database.
-    """
-    # In a real scenario, we'd fetch actual data here
-    # logs = db.query(models.OperationalLog).all()
-    # Mock training for now
-    result = train.train_model(None, None)
+def trigger_training():
+    """(Re)train the yield model on the agronomic dataset and refresh the cache."""
+    result = train.train_model()
+    predict.reset_cache()  # so the next /predict serves the freshly trained model
     return result
+
+
+@router.get("/model")
+def model_info():
+    """Return metadata (metrics, feature importances, train time) for the model."""
+    if not os.path.exists(train.META_PATH):
+        return {"trained": False}
+    with open(train.META_PATH) as fh:
+        return {"trained": True, **json.load(fh)}

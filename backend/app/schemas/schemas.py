@@ -71,6 +71,25 @@ class MonthlyPnlPoint(BaseModel):
     revenue: float
     expenses: float
 
+# --- DSS (yield prediction) Schemas ---
+class DSSPredictRequest(BaseModel):
+    # Bounds mirror ml/dataset.BOUNDS so out-of-range inputs are rejected with a
+    # clean 422 before they ever reach the model.
+    rainfall: float = Field(..., ge=300, le=2000, description="Seasonal rainfall (mm)")
+    fertilizer_used: float = Field(..., ge=0, le=120, description="Nitrogen applied (kg/ha)")
+    soil_ph: float = Field(..., ge=4.5, le=8.5, description="Soil pH")
+
+class DSSInterval(BaseModel):
+    lower: float
+    upper: float
+
+class DSSPredictResponse(BaseModel):
+    prediction: float
+    unit: str
+    confidence: float
+    interval: DSSInterval
+    feature_importances: Dict[str, float]
+
 # --- Maintenance Log Schemas ---
 class MaintenanceLogBase(BaseModel):
     equipment_id: int

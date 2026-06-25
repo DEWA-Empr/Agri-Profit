@@ -56,6 +56,18 @@ async def handle_unexpected_error(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+@app.on_event("startup")
+def ensure_dss_model() -> None:
+    """Train the DSS yield model on boot if the image has none baked in."""
+    try:
+        from .ml import train
+
+        if train.ensure_model():
+            logger.info("DSS model trained on startup")
+    except Exception:  # never block API startup on an ML failure
+        logger.exception("DSS model startup training failed")
+
+
 app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")

@@ -41,8 +41,9 @@ Thumbs.db
 # Docker volumes (local mounts)
 postgres_data/
 
-# ML models
+# ML models + generated training data (regenerated from ml/dataset.py)
 backend/app/ml/models/
+backend/app/ml/data/
 
 # Test cache
 .pytest_cache/
@@ -51,3 +52,6 @@ htmlcov/
 
 # Claude Code local settings (personal overrides)
 .claude/settings.local.json
+
+# Local design-review screenshots (generated, not source)
+screenshots/

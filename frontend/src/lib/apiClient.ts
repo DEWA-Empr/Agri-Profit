@@ -40,11 +40,14 @@ export const equipmentService = {
   createMaintenance: (data: MaintenanceLogCreate) => api.post<MaintenanceLog>('/equipment/maintenance', data),
 };
 
-// The DSS model output shape (a prediction string, or an error/detail message).
+// The DSS yield model output: a predicted yield plus an honest confidence
+// (derived from the spread across the forest's trees) and a prediction interval.
 export interface DssPrediction {
-  prediction?: string;
-  error?: string;
-  detail?: string;
+  prediction: number;
+  unit: string;
+  confidence: number;
+  interval: { lower: number; upper: number };
+  feature_importances: Record<string, number>;
 }
 
 export const dssService = {
