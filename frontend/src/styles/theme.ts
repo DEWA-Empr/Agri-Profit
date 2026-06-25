@@ -51,6 +51,34 @@ export const colors = {
   infoAlt: '#378ADD',
 } as const;
 
+// Semantic accent set for Decision Support cards (and similar callouts). Each
+// has a foreground (text/icon), a soft background tint, and a left-border bar.
+export const accents = {
+  alert: { fg: '#C0392B', bg: 'rgba(192,57,43,0.06)', bar: '#C0392B', label: 'Alert' },
+  opportunity: { fg: '#A05C00', bg: 'rgba(160,92,0,0.07)', bar: '#D4A843', label: 'Opportunity' },
+  insight: { fg: '#3B6D11', bg: 'rgba(99,153,34,0.08)', bar: '#639922', label: 'Insight' },
+  window: { fg: '#185FA5', bg: 'rgba(24,95,165,0.06)', bar: '#378ADD', label: 'Window' },
+} as const;
+
+export type AccentKey = keyof typeof accents;
+
+// Ordered palette for the cost-breakdown segmented bar (greens → earth tones),
+// applied to operating-cost categories in order of size.
+export const categoryColors = [
+  '#3B6D11', '#639922', '#97C459', '#C0DD97', '#D4A843', '#BA7517', '#A05C00',
+] as const;
+
+// Crop pill tints for the field-performance table.
+export const cropTints: Record<string, { bg: string; fg: string }> = {
+  maize: { bg: '#eaf3da', fg: '#3B6D11' },
+  soybean: { bg: '#e3eed9', fg: '#5a7a2a' },
+  wheat: { bg: '#f6ecd6', fg: '#9a6a16' },
+  default: { bg: '#eef1ea', fg: '#5a6650' },
+};
+
+// Soft elevation used by content cards in the #04 look.
+export const cardShadow = '0 1px 2px rgba(15,31,9,0.04), 0 1px 3px rgba(15,31,9,0.03)';
+
 export const radius = {
   sm: '6px',
   md: '8px',

@@ -40,14 +40,7 @@ const EquipmentPage = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Tractor size={20} color={colors.primary} />
-          <div>
-            <h2 style={{ fontSize: '17px', fontWeight: 600, color: colors.textStrong }}>Equipment</h2>
-            <p style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>Machinery, acquisition cost, depreciation and maintenance.</p>
-          </div>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
           style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.primaryDark, color: colors.onPrimary, padding: '8px 14px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
