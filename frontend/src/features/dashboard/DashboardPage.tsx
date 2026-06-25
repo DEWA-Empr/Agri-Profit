@@ -1,70 +1,54 @@
-import React, { useEffect, useState } from 'react';
-import { TrendingUp, TrendingDown, Wallet, ClipboardList } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import type { FC } from 'react';
 import { ledgerService } from '../../lib/apiClient';
-import type { Summary, OperationalLog } from '../../types/domain';
-import { colors } from '../../styles/theme';
+import type { Summary } from '../../types/domain';
 import { MetricCard } from './components/MetricCard';
 import { PnlChart } from './components/PnlChart';
-import { RecentActivities } from './components/RecentActivities';
-import { HealthScore } from './components/HealthScore';
-import { QuickLogForm } from './components/QuickLogForm';
+import { CostBreakdown } from './components/CostBreakdown';
+import { FieldPerformance } from './components/FieldPerformance';
+import { DecisionSupport } from './components/DecisionSupport';
 
-const DashboardPage: React.FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => {
+// Abbreviate large Naira figures the way the #04 mockup does (₦42.85M),
+// falling back to full numbers for small values.
+const fmt = (n: number): string => {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `₦${(n / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `₦${(n / 1_000).toFixed(1)}K`;
+  return `₦${n.toLocaleString()}`;
+};
+
+// The DashboardPage still receives isOnline/pendingCount from the router; they
+// are no longer used here (quick-logging moved to the Farm Records form).
+const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
   const [summary, setSummary] = useState<Summary>({ revenue: 0, expenses: 0, gross_margin: 0 });
-  const [logs, setLogs] = useState<OperationalLog[]>([]);
 
-  const fetchData = async () => {
-    try {
-      const [sRes, lRes] = await Promise.all([
-        ledgerService.getSummary(),
-        ledgerService.getLogs(),
-      ]);
-      setSummary(sRes.data);
-      setLogs(lRes.data);
-    } catch (err) { console.error(err); }
-  };
+  useEffect(() => {
+    ledgerService.getSummary().then((res) => setSummary(res.data)).catch((err) => console.error(err));
+  }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  const marginPct = summary.revenue > 0 ? (summary.gross_margin / summary.revenue) * 100 : 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-
-      {/* METRIC GRID */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '11px' }}>
-        <MetricCard
-          label="Total Revenue" value={`₦${summary.revenue.toLocaleString()}`}
-          trend="↑ 12%" icon={<TrendingUp />}
-          iconBg="#dff0c4" iconColor={colors.primaryDark} trendBg="#e8f5d4" trendColor={colors.primaryDark} isRevenue
-        />
-        <MetricCard
-          label="Total Expenses" value={`₦${summary.expenses.toLocaleString()}`}
-          trend="↑ 4%" icon={<TrendingDown />}
-          iconBg="#fde8e8" iconColor={colors.dangerAlt} trendBg="#fde8e8" trendColor={colors.dangerAlt}
-        />
-        <MetricCard
-          label="Gross Margin" value={`₦${summary.gross_margin.toLocaleString()}`}
-          trend="50% rate" icon={<Wallet />}
-          iconBg="#ddeeff" iconColor={colors.info} trendBg="#e8f5d4" trendColor={colors.primaryDark}
-        />
-        <MetricCard
-          label="Total Activities" value={logs.length > 0 ? logs.length.toString() : '24'}
-          trend="+6 this wk" icon={<ClipboardList />}
-          iconBg="#fef3d8" iconColor={colors.warn} trendBg="#fff3e0" trendColor={colors.warn}
-        />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      {/* KPI ROW — first four are real (from /ledger/summary); avg yield is illustrative. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '11px' }}>
+        <MetricCard label="Net Profit" value={fmt(summary.gross_margin)} delta="↑ 12.4% YoY" deltaTone={summary.gross_margin >= 0 ? 'up' : 'down'} spark={[8, 11, 10, 14, 17, 22]} highlight />
+        <MetricCard label="Gross Revenue" value={fmt(summary.revenue)} delta="↑ 8.1% YoY" deltaTone="up" spark={[30, 34, 33, 40, 44, 48]} />
+        <MetricCard label="Operating Cost" value={fmt(summary.expenses)} delta="↑ 5.6% YoY" deltaTone="down" spark={[18, 20, 19, 24, 26, 28]} />
+        <MetricCard label="Profit Margin" value={`${marginPct.toFixed(1)}%`} delta="↑ 2.0 pts" deltaTone="up" spark={[38, 40, 39, 41, 42, 43]} />
+        <MetricCard label="Avg Yield" value="168 bu/ac" delta="↑ 4.3% YoY" deltaTone="up" spark={[150, 156, 154, 160, 164, 168]} />
       </div>
 
-      <div style={{ display: 'flex', gap: '22px' }}>
-        {/* LEFT COLUMN */}
-        <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: '22px' }}>
-          <PnlChart />
-          <RecentActivities logs={logs} />
-        </div>
+      {/* TREND + COST */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '18px', alignItems: 'start' }}>
+        <PnlChart />
+        <CostBreakdown />
+      </div>
 
-        {/* RIGHT COLUMN */}
-        <div style={{ flex: 0.8, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <HealthScore />
-          <QuickLogForm isOnline={isOnline} pendingCount={pendingCount} onSaved={fetchData} />
-        </div>
+      {/* FIELDS + DECISIONS */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '18px', alignItems: 'start' }}>
+        <FieldPerformance />
+        <DecisionSupport />
       </div>
     </div>
   );
