@@ -7,7 +7,11 @@ import { colors } from '../../styles/theme';
 
 // Left navigation rail: brand, season badge, nav (rendered from navSections),
 // sync status, and the user profile footer.
-export const Sidebar: FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => (
+//
+// Most nav badges are static (declared in navSections); the Farm Records badge
+// is live — it reflects the real record count so it can never contradict the
+// "no records yet" empty state. A null count (not yet loaded) or zero hides it.
+export const Sidebar: FC<{ isOnline: boolean; pendingCount: number; recordCount: number | null }> = ({ isOnline, pendingCount, recordCount }) => (
   <aside style={{ width: '220px', backgroundColor: colors.sidebarBg, display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '0.5px solid rgba(99, 153, 34, 0.15)' }}>
 
     {/* Logo Area */}
@@ -36,9 +40,14 @@ export const Sidebar: FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnl
       {navSections.map((section) => (
         <div key={section.heading}>
           <p style={{ fontSize: '9px', color: colors.sidebarHeading, fontWeight: '800', letterSpacing: '0.1em', padding: '14px 18px 5px' }}>{section.heading}</p>
-          {section.items.map((item) => (
-            <NavItem key={item.to} icon={item.icon} label={item.label} to={item.to} badge={item.badge} />
-          ))}
+          {section.items.map((item) => {
+            // Farm Records carries the live record count; others use their
+            // static badge (if any).
+            const badge = item.to === '/records'
+              ? (recordCount ? String(recordCount) : undefined)
+              : item.badge;
+            return <NavItem key={item.to} icon={item.icon} label={item.label} to={item.to} badge={badge} />;
+          })}
         </div>
       ))}
     </nav>

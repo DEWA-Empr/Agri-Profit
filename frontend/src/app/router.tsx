@@ -34,7 +34,7 @@ export const navSections: NavSection[] = [
     heading: 'OVERVIEW',
     items: [
       { label: 'Dashboard', to: '/', icon: <LayoutDashboard size={14} /> },
-      { label: 'Farm Records', to: '/records', icon: <ClipboardList size={14} />, badge: '24' },
+      { label: 'Farm Records', to: '/records', icon: <ClipboardList size={14} /> },
       { label: 'P&L Report', to: '/reports', icon: <FileText size={14} /> },
     ],
   },
@@ -55,10 +55,10 @@ export const navSections: NavSection[] = [
   },
 ];
 
-export const AppRoutes: FC<{ isOnline: boolean; pendingCount: number }> = ({ isOnline, pendingCount }) => (
+export const AppRoutes: FC<{ isOnline: boolean; pendingCount: number; onRecordChange: () => void }> = ({ isOnline, pendingCount, onRecordChange }) => (
   <Routes>
     <Route path="/" element={<DashboardPage isOnline={isOnline} pendingCount={pendingCount} />} />
-    <Route path="/records" element={<FarmRecordsPage isOnline={isOnline} />} />
+    <Route path="/records" element={<FarmRecordsPage isOnline={isOnline} onRecordChange={onRecordChange} />} />
     <Route path="/reports" element={<ReportsPage />} />
     <Route path="/equipment" element={<EquipmentPage />} />
     <Route path="/dss" element={<DSSPredictPage />} />

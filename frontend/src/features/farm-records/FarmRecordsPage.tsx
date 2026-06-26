@@ -8,7 +8,9 @@ import { FarmRecordCreateForm } from './FarmRecordCreateForm';
 
 // Farm Records = the list of Operational Logs (each with its paired Financial
 // Transaction), plus a full create form for logging new activity.
-const FarmRecordsPage = ({ isOnline }: { isOnline: boolean }) => {
+// onRecordChange notifies the app shell (via App) that the record set changed,
+// so the live Farm Records nav badge can refresh.
+const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRecordChange?: () => void }) => {
   const [logs, setLogs] = useState<OperationalLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -18,6 +20,12 @@ const FarmRecordsPage = ({ isOnline }: { isOnline: boolean }) => {
       .then((res) => setLogs(res.data))
       .catch((err) => console.error(err))
       .finally(() => setLoading(false));
+  };
+
+  // After a save: refresh this list and the sidebar badge.
+  const handleSaved = () => {
+    fetchLogs();
+    onRecordChange?.();
   };
 
   useEffect(() => { fetchLogs(); }, []);
@@ -37,7 +45,7 @@ const FarmRecordsPage = ({ isOnline }: { isOnline: boolean }) => {
       </div>
 
       {showForm && (
-        <FarmRecordCreateForm isOnline={isOnline} onSaved={fetchLogs} onClose={() => setShowForm(false)} />
+        <FarmRecordCreateForm isOnline={isOnline} onSaved={handleSaved} onClose={() => setShowForm(false)} />
       )}
 
       {!loading && logs.length === 0 && !showForm ? (
