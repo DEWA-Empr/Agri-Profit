@@ -1,8 +1,9 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, ClipboardList } from 'lucide-react';
 import { ledgerService } from '../../lib/apiClient';
 import type { OperationalLog } from '../../types/domain';
 import { colors } from '../../styles/theme';
+import { EmptyState } from '../../components/EmptyState';
 import { FarmRecordCreateForm } from './FarmRecordCreateForm';
 
 // Farm Records = the list of Operational Logs (each with its paired Financial
@@ -39,6 +40,21 @@ const FarmRecordsPage = ({ isOnline }: { isOnline: boolean }) => {
         <FarmRecordCreateForm isOnline={isOnline} onSaved={fetchLogs} onClose={() => setShowForm(false)} />
       )}
 
+      {!loading && logs.length === 0 && !showForm ? (
+        <EmptyState
+          icon={<ClipboardList size={26} color={colors.primary} />}
+          title="No records yet"
+          description="Log your first activity — a planting, an input purchase or a sale — and it will flow into your profit, costs and reports."
+          action={
+            <button
+              onClick={() => setShowForm(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.primaryDark, color: colors.onPrimary, padding: '10px 16px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Plus size={16} /> Log your first activity
+            </button>
+          }
+        />
+      ) : (
       <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, overflow: 'hidden' }}>
         {loading ? (
           <p style={{ padding: '24px', fontSize: '12px', color: colors.textMuted }}>Loading records…</p>
@@ -75,6 +91,7 @@ const FarmRecordsPage = ({ isOnline }: { isOnline: boolean }) => {
           </table>
         )}
       </div>
+      )}
     </div>
   );
 };

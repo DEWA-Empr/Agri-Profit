@@ -7,6 +7,7 @@ import { PnlChart } from './components/PnlChart';
 import { CostBreakdown } from './components/CostBreakdown';
 import { FieldPerformance } from './components/FieldPerformance';
 import { DecisionSupport } from './components/DecisionSupport';
+import { DashboardOnboarding } from './components/DashboardOnboarding';
 
 // Abbreviate large Naira figures the way the #04 mockup does (₦42.85M),
 // falling back to full numbers for small values.
@@ -21,12 +22,24 @@ const fmt = (n: number): string => {
 // are no longer used here (quick-logging moved to the Farm Records form).
 const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
   const [summary, setSummary] = useState<Summary>({ revenue: 0, expenses: 0, gross_margin: 0 });
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    ledgerService.getSummary().then((res) => setSummary(res.data)).catch((err) => console.error(err));
+    ledgerService.getSummary()
+      .then((res) => setSummary(res.data))
+      .catch((err) => console.error(err))
+      .finally(() => setLoaded(true));
   }, []);
 
   const marginPct = summary.revenue > 0 ? (summary.gross_margin / summary.revenue) * 100 : 0;
+
+  // First run: nothing in the ledger yet. Show onboarding rather than a wall of
+  // zeros and illustrative cards. Wait until the summary has loaded so we don't
+  // flash the onboarding before real figures arrive.
+  const isEmpty = summary.revenue === 0 && summary.expenses === 0 && summary.gross_margin === 0;
+  if (loaded && isEmpty) {
+    return <DashboardOnboarding />;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
