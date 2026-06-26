@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
 
 # --- Financial Transaction Schemas ---
@@ -72,12 +72,17 @@ class MonthlyPnlPoint(BaseModel):
     expenses: float
 
 # --- DSS (yield prediction) Schemas ---
+# Crops the model is trained on; mirrors ml/dataset.CROPS. Literal gives a clean
+# 422 (with the allowed values) when an unknown crop is sent.
+DSSCrop = Literal["maize", "rice", "sorghum", "soybean", "cassava"]
+
 class DSSPredictRequest(BaseModel):
     # Bounds mirror ml/dataset.BOUNDS so out-of-range inputs are rejected with a
     # clean 422 before they ever reach the model.
     rainfall: float = Field(..., ge=300, le=2000, description="Seasonal rainfall (mm)")
     fertilizer_used: float = Field(..., ge=0, le=120, description="Nitrogen applied (kg/ha)")
     soil_ph: float = Field(..., ge=4.5, le=8.5, description="Soil pH")
+    crop: DSSCrop = Field(..., description="Crop to forecast yield for")
 
 class DSSInterval(BaseModel):
     lower: float

@@ -50,8 +50,16 @@ export interface DssPrediction {
   feature_importances: Record<string, number>;
 }
 
+// Predict request: three numeric field conditions plus the crop to forecast.
+export interface DssPredictInput {
+  rainfall: number;
+  fertilizer_used: number;
+  soil_ph: number;
+  crop: string;
+}
+
 export const dssService = {
-  predict: (data: Record<string, number>) => api.post<DssPrediction>('/dss/predict', data),
+  predict: (data: DssPredictInput) => api.post<DssPrediction>('/dss/predict', data),
   train: () => api.post('/dss/train'),
 };
 

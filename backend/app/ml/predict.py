@@ -1,7 +1,7 @@
 # Predictive DSS Engine - Inference logic
 #
-# Loads the trained RandomForest once and serves yield predictions. Confidence
-# is derived honestly from the spread of the forest's individual trees: a tight
+# Loads the trained pipeline once and serves yield predictions. Confidence is
+# derived honestly from the spread of the forest's individual trees: tight
 # agreement between trees -> high confidence; a wide spread -> low confidence.
 # This replaces the previously hardcoded "84.2%" in the UI.
 
@@ -10,6 +10,7 @@ import os
 
 import joblib
 import numpy as np
+import pandas as pd
 
 from ..core.exceptions import ServiceUnavailableError
 from . import dataset
@@ -47,16 +48,25 @@ def predict_yield(data: dict) -> dict:
     """Predict yield (t/ha) with a confidence and prediction interval."""
     model, meta = _load()
 
-    # Assemble the feature vector in the exact order the model was trained on.
+    # Assemble a single-row frame with the exact columns the pipeline expects.
+    # The pipeline's encoder turns `crop` into the one-hot columns internally.
     try:
-        row = [float(data[f]) for f in dataset.FEATURES]
+        row = {f: data[f] for f in dataset.FEATURES}
+        row["rainfall"] = float(row["rainfall"])
+        row["fertilizer_used"] = float(row["fertilizer_used"])
+        row["soil_ph"] = float(row["soil_ph"])
+        row["crop"] = str(row["crop"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ServiceUnavailableError(f"Invalid feature input: {exc}")
 
-    X = np.array([row])
+    X = pd.DataFrame([row], columns=dataset.FEATURES)
 
-    # Mean prediction, plus the per-tree spread for an honest uncertainty band.
-    tree_preds = np.array([tree.predict(X)[0] for tree in model.estimators_])
+    # Run the shared preprocessing once, then poll each tree on the encoded row
+    # for an honest uncertainty band (the forest's own disagreement).
+    prep = model.named_steps["prep"]
+    forest = model.named_steps["rf"]
+    X_enc = prep.transform(X)
+    tree_preds = np.array([tree.predict(X_enc)[0] for tree in forest.estimators_])
     mean = float(tree_preds.mean())
     std = float(tree_preds.std())
 

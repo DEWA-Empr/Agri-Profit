@@ -1,27 +1,38 @@
 import { useState, type CSSProperties } from 'react';
 import { BrainCircuit, Play, BarChart3, Info, AlertTriangle } from 'lucide-react';
-import { dssService, type DssPrediction } from '../../lib/apiClient';
+import { dssService, type DssPrediction, type DssPredictInput } from '../../lib/apiClient';
 import { colors } from '../../styles/theme';
 
-// Human labels + bounds for the three model inputs. Bounds mirror the backend
-// (ml/dataset.BOUNDS) so the UI nudges users to valid ranges before they submit.
+// Human labels + bounds for the three numeric model inputs. Bounds mirror the
+// backend (ml/dataset.BOUNDS) so the UI nudges users to valid ranges before
+// they submit.
 const FIELDS = [
   { key: 'rainfall', label: 'Rainfall (mm)', min: 300, max: 2000, step: 10 },
   { key: 'fertilizer_used', label: 'Fertilizer (kg N/ha)', min: 0, max: 120, step: 1 },
   { key: 'soil_ph', label: 'Soil pH', min: 4.5, max: 8.5, step: 0.1 },
 ] as const;
 
+// Crops the model is trained on; mirrors backend schemas.DSSCrop / dataset.CROPS.
+const CROPS = [
+  { value: 'maize', label: 'Maize' },
+  { value: 'rice', label: 'Rice' },
+  { value: 'sorghum', label: 'Sorghum' },
+  { value: 'soybean', label: 'Soybean' },
+  { value: 'cassava', label: 'Cassava' },
+] as const;
+
 const IMPORTANCE_LABELS: Record<string, string> = {
   rainfall: 'Rainfall',
   fertilizer_used: 'Fertilizer',
   soil_ph: 'Soil pH',
+  crop: 'Crop',
 };
 
 const DSSPredictPage = () => {
   const [prediction, setPrediction] = useState<DssPrediction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [inputs, setInputs] = useState<Record<string, number>>({ rainfall: 1200, fertilizer_used: 50, soil_ph: 6.5 });
+  const [inputs, setInputs] = useState<DssPredictInput>({ rainfall: 1200, fertilizer_used: 50, soil_ph: 6.5, crop: 'maize' });
 
   const handlePredict = async () => {
     setLoading(true);
@@ -60,6 +71,18 @@ const DSSPredictPage = () => {
             <Info size={16} color={colors.primary} /> Model Inputs
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={label}>Crop</label>
+              <select
+                value={inputs.crop}
+                onChange={(e) => setInputs({ ...inputs, crop: e.target.value })}
+                style={{ ...input, cursor: 'pointer' }}
+              >
+                {CROPS.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+            </div>
             {FIELDS.map((f) => (
               <div key={f.key}>
                 <label style={label}>{f.label}</label>

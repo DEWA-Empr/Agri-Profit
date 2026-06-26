@@ -15,7 +15,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
   '/records': { title: 'Farm Records', subtitle: 'All logged operational activities and their financial impact.' },
   '/reports': { title: 'P&L Report', subtitle: 'Profit & loss by activity category, from the financial ledger.' },
   '/equipment': { title: 'Equipment', subtitle: 'Machinery, acquisition cost, depreciation and maintenance.' },
-  '/dss': { title: 'Predictive DSS', subtitle: 'Forecast yields and optimize resources from your farm data.' },
+  '/dss': { title: 'Predictive DSS', subtitle: 'Forecast crop yield from rainfall, fertilizer and soil pH.' },
   '/investors': { title: 'Investors', subtitle: 'Stakeholder reporting for investors and lenders.' },
   '/ussd': { title: 'USSD / SMS', subtitle: 'Low-bandwidth access from any phone, without the app.' },
   '/whatsapp': { title: 'WhatsApp', subtitle: 'Conversational logging and reports via WhatsApp.' },
