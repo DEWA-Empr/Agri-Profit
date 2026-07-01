@@ -57,5 +57,5 @@ _Avoid_: Service record, repair log, maintenance record
 ### Intelligence
 
 **Predictive DSS**:
-The decision-support system that generates yield predictions, risk assessments, and Gross Margin projections from historical Operational Logs and Financial Transactions. Users may run custom Python scripts against their farm data within a sandboxed execution environment.
-_Avoid_: ML model, prediction engine, AI system
+A two-tier decision-support system. **Tier 1 (deterministic rule-based):** computes unit cost of production and per-crop Gross Margin directly from the farm's real Operational Logs and Financial Transactions. **Tier 2 (statistical forecast, optional):** a RandomForest yield model trained on representative _synthetic_ data (`backend/app/ml/dataset.py`), used while a farm accumulates enough real historical records to retrain on later. The forecast tier does **not** learn from the farm's own records in this release.
+_Avoid_: AI system, self-learning model, neural network
