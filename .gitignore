@@ -55,3 +55,9 @@ htmlcov/
 
 # Local design-review screenshots (generated, not source)
 screenshots/
+
+# Documents (write-ups / exports — not source)
+*.docx
+
+# Generated standalone HTML export
+AgriProfit-standalone.html
