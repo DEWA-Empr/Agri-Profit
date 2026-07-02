@@ -55,12 +55,32 @@ def test_get_summary(client):
     assert data["expenses"] == 25000.0
     assert data["gross_margin"] == 15000.0
 
-def test_dss_predict_without_model_returns_503(client):
-    payload = {"features": [1, 2, 3]}
-    response = client.post("/api/v1/dss/predict", json=payload)
-    # No model is trained in the test environment, so the engine is unavailable.
-    assert response.status_code == 503
+def test_dss_predict_rejects_malformed_payload(client):
+    # The multi-crop DSS endpoint validates its body against the model's training
+    # bounds. A legacy {"features": [...]} payload is missing every required
+    # field (rainfall, fertilizer_used, soil_ph, crop), so it is a 422 — not the
+    # 503 this test used to assert.
+    #
+    # The engine's "no model trained" -> 503 branch is unreachable from the API
+    # here: the app's startup hook (ensure_dss_model -> train.ensure_model) trains
+    # and persists a model before any request runs, so a well-formed payload
+    # returns 200 (see below) and a malformed one is rejected at validation.
+    response = client.post("/api/v1/dss/predict", json={"features": [1, 2, 3]})
+    assert response.status_code == 422
     assert "detail" in response.json()
+
+
+def test_dss_predict_returns_forecast(client):
+    # Honest happy path: the startup hook has trained the synthetic-data model,
+    # so a well-formed agronomic payload yields a forecast carrying a confidence
+    # and a prediction interval (the shape the dashboard consumes).
+    payload = {"rainfall": 1200, "fertilizer_used": 60, "soil_ph": 6.2, "crop": "maize"}
+    response = client.post("/api/v1/dss/predict", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["prediction"] > 0
+    assert 0.0 <= data["confidence"] <= 100.0
+    assert set(data["interval"]) == {"lower", "upper"}
 
 def test_equipment_lifecycle(client):
     # 1. Create equipment
@@ -109,11 +129,23 @@ def test_idempotent_log_creation(client):
             "tax_category": "Agriculture Inputs"
         }
     }
+    # Replaying the same client_id (an offline log flushed twice after a
+    # dropped connection) must be idempotent: same id back, and — crucially —
+    # exactly one record stored, with no double-booked financial transaction.
     r1 = client.post("/api/v1/ledger/logs", json=payload)
     assert r1.status_code == 200
     r2 = client.post("/api/v1/ledger/logs", json=payload)
     assert r2.status_code == 200
     assert r1.json()["id"] == r2.json()["id"]
+
+    # Prove single-record persistence, not just id equality: the second POST
+    # must not have created a duplicate log or a duplicate paired transaction.
+    logs = client.get("/api/v1/ledger/logs")
+    assert logs.status_code == 200
+    assert len(logs.json()) == 1
+    transactions = client.get("/api/v1/ledger/transactions")
+    assert transactions.status_code == 200
+    assert len(transactions.json()) == 1
 
 def test_maintenance_for_missing_equipment_returns_404(client):
     payload = {"equipment_id": 999999, "description": "Service on a ghost", "cost": 100.0}
