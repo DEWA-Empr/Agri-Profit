@@ -25,6 +25,7 @@ class OperationalLogBase(BaseModel):
     description: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
+    crop: Optional[str] = None
     extra_data: Optional[Dict[str, Any]] = None
     client_id: Optional[str] = None
 
@@ -94,6 +95,28 @@ class DSSPredictResponse(BaseModel):
     confidence: float
     interval: DSSInterval
     feature_importances: Dict[str, float]
+
+# --- DSS (Tier 1: deterministic decision support) Schemas ---
+# Metrics derived directly from the farm's real ledger (no model, no synthetic
+# inputs). See services/dss_service.py and Chapter 3 §3.6.5.
+class DSSCropMetrics(BaseModel):
+    crop: str
+    revenue: float
+    expenses: float
+    gross_margin: float
+    yield_quantity: float
+    yield_unit: Optional[str] = None
+    # None when the crop has no recorded yield quantity (no division by zero).
+    unit_cost_of_production: Optional[float] = None
+
+class DSSOverall(BaseModel):
+    revenue: float
+    expenses: float
+    gross_margin: float
+
+class DSSDecisionSupport(BaseModel):
+    crops: List[DSSCropMetrics]
+    overall: DSSOverall
 
 # --- Maintenance Log Schemas ---
 class MaintenanceLogBase(BaseModel):

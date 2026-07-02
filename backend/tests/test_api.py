@@ -1,3 +1,6 @@
+import pytest
+
+
 def _post_log(client, *, activity_type, amount, transaction_type, category=None, client_id=None):
     """Create an operational log with its paired financial transaction."""
     payload = {
@@ -81,6 +84,73 @@ def test_dss_predict_returns_forecast(client):
     assert data["prediction"] > 0
     assert 0.0 <= data["confidence"] <= 100.0
     assert set(data["interval"]) == {"lower", "upper"}
+
+def _post_crop_log(client, *, activity_type, crop, amount, transaction_type, quantity=None, unit=None):
+    """Seed a crop-tagged operational log with its paired financial transaction."""
+    payload = {
+        "activity_type": activity_type,
+        "description": f"{crop} {activity_type}",
+        "crop": crop,
+        "financial_data": {
+            "amount": amount,
+            "transaction_type": transaction_type,
+            "category": activity_type,
+        },
+    }
+    if quantity is not None:
+        payload["quantity"] = quantity
+    if unit is not None:
+        payload["unit"] = unit
+    return client.post("/api/v1/ledger/logs", json=payload)
+
+
+def test_dss_decision_support_empty_ledger(client):
+    # Empty ledger: no crops and zeroed overall totals. The client renders an
+    # empty state from this — never fabricated numbers.
+    response = client.get("/api/v1/dss/decision-support")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["crops"] == []
+    assert data["overall"] == {"revenue": 0.0, "expenses": 0.0, "gross_margin": 0.0}
+
+
+def test_dss_decision_support_computes_from_ledger(client):
+    # Seed real, crop-tagged ledger rows and assert the deterministic Tier-1
+    # figures match a hand calculation (Chapter 3 §3.8.1: arithmetic fidelity):
+    #
+    #   maize: fertilizer debit ₦25,000; yield credit ₦40,000 over 12 bags
+    #          gross margin = 40,000 − 25,000            = ₦15,000
+    #          unit cost    = 25,000 / 12                = ₦2,083.33…
+    #   rice:  labour debit ₦10,000; no yield recorded
+    #          gross margin = 0 − 10,000                 = −₦10,000
+    #          unit cost    = None (no yield → no divide by zero)
+    #   overall gross margin = 15,000 + (−10,000)        = ₦5,000
+    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit").status_code == 200
+    assert _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags").status_code == 200
+    assert _post_crop_log(client, activity_type="labour", crop="rice", amount=10000.0, transaction_type="debit").status_code == 200
+
+    response = client.get("/api/v1/dss/decision-support")
+    assert response.status_code == 200
+    data = response.json()
+
+    crops = {c["crop"]: c for c in data["crops"]}
+    assert set(crops) == {"maize", "rice"}
+
+    maize = crops["maize"]
+    assert maize["revenue"] == 40000.0
+    assert maize["expenses"] == 25000.0
+    assert maize["gross_margin"] == 15000.0
+    assert maize["yield_quantity"] == 12.0
+    assert maize["yield_unit"] == "bags"
+    assert maize["unit_cost_of_production"] == pytest.approx(25000.0 / 12.0)
+
+    rice = crops["rice"]
+    assert rice["gross_margin"] == -10000.0
+    assert rice["yield_quantity"] == 0.0
+    assert rice["unit_cost_of_production"] is None
+
+    assert data["overall"] == {"revenue": 40000.0, "expenses": 35000.0, "gross_margin": 5000.0}
+
 
 def test_equipment_lifecycle(client):
     # 1. Create equipment

@@ -33,6 +33,7 @@ export interface OperationalLog {
   description?: string | null;
   quantity?: number | null;
   unit?: string | null;
+  crop?: string | null;
   timestamp: string;
   financial_transaction_id?: number | null;
   financial_transaction?: FinancialTransaction | null;
@@ -84,6 +85,24 @@ export interface MonthlyPnlPoint {
   expenses: number;
 }
 
+// --- DSS Tier 1: deterministic decision support (GET /dss/decision-support) ---
+// Per-crop metrics computed from the real ledger — no model, no synthetic data.
+export interface DssCropMetrics {
+  crop: string;
+  revenue: number;
+  expenses: number;
+  gross_margin: number;
+  yield_quantity: number;
+  yield_unit?: string | null;
+  // null when the crop has no recorded yield (no fabricated unit cost).
+  unit_cost_of_production?: number | null;
+}
+
+export interface DssDecisionSupport {
+  crops: DssCropMetrics[];
+  overall: { revenue: number; expenses: number; gross_margin: number };
+}
+
 // --- Create payloads (request bodies) ---
 
 export interface FinancialTransactionCreate {
@@ -100,6 +119,7 @@ export interface OperationalLogCreate {
   description?: string;
   quantity?: number;
   unit?: string;
+  crop?: string;
   client_id?: string;
   extra_data?: Record<string, unknown>;
   financial_data: FinancialTransactionCreate;

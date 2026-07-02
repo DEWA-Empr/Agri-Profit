@@ -33,6 +33,7 @@ def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
         description=log.description,
         quantity=log.quantity,
         unit=log.unit,
+        crop=log.crop,
         extra_data=log.extra_data,
         client_id=log.client_id,
         financial_transaction_id=financial_tx.id

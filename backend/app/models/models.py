@@ -16,7 +16,12 @@ class OperationalLog(Base):
     
     # Bioprocess parameters or custom data
     extra_data = Column(JSON, nullable=True) # e.g., {"drying_time": 48, "humidity": 12.5}
-    
+
+    # Crop this activity belongs to (e.g. "maize"). Nullable: pre-existing logs
+    # and app-entered records without a crop fall into the "Unspecified" bucket
+    # of the Tier-1 decision-support report. Indexed for per-crop grouping.
+    crop = Column(String, nullable=True, index=True)
+
     client_id = Column(String, unique=True, nullable=True, index=True)
 
     # Link to financial transaction

@@ -10,6 +10,7 @@ import type {
   MaintenanceLogCreate,
   PnlReport,
   MonthlyPnlPoint,
+  DssDecisionSupport,
 } from '../types/domain';
 
 // The single axios instance for the whole app. Components and feature api
@@ -61,6 +62,8 @@ export interface DssPredictInput {
 export const dssService = {
   predict: (data: DssPredictInput) => api.post<DssPrediction>('/dss/predict', data),
   train: () => api.post('/dss/train'),
+  // Tier 1: deterministic per-crop metrics computed from the real ledger.
+  getDecisionSupport: () => api.get<DssDecisionSupport>('/dss/decision-support'),
 };
 
 export const reportsService = {

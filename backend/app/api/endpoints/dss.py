@@ -1,12 +1,24 @@
 import json
 import os
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from ...ml import predict, train
+from ...models.database import get_db
 from ...schemas import schemas
+from ...services import dss_service
 
 router = APIRouter(prefix="/dss", tags=["dss"])
+
+
+@router.get("/decision-support", response_model=schemas.DSSDecisionSupport)
+def get_decision_support(db: Session = Depends(get_db)):
+    """Tier 1 deterministic decision support: per-crop unit cost of production
+    and gross margin computed directly from the real ledger (no model). Returns
+    empty `crops` when the ledger is empty — the client shows an empty state
+    rather than fabricated figures."""
+    return dss_service.get_decision_support(db)
 
 
 @router.post("/predict", response_model=schemas.DSSPredictResponse)

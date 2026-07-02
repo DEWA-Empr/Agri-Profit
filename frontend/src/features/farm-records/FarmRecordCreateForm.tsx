@@ -14,6 +14,11 @@ const CATEGORIES: { value: Category; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
+// Crops the deterministic DSS groups by (mirrors the yield model's crops). A
+// record's crop drives the per-crop unit-cost / gross-margin panel; leaving it
+// blank files the record under "Unspecified" there.
+const CROPS = ['maize', 'rice', 'sorghum', 'soybean', 'cassava'];
+
 // Sales/income default to a credit; everything else is a cost (debit).
 const defaultTxType = (c: Category): TransactionType => (c === 'yield' ? 'credit' : 'debit');
 
@@ -29,6 +34,7 @@ interface Props {
 export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
   const [form, setForm] = useState({
     activity_type: 'yield' as Category,
+    crop: '',
     description: '',
     quantity: '',
     unit: '',
@@ -50,6 +56,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
 
     const payload: Omit<OperationalLogCreate, 'client_id'> = {
       activity_type: form.activity_type,
+      crop: form.crop || undefined,
       description: form.description || undefined,
       quantity: form.quantity ? parseFloat(form.quantity) : undefined,
       unit: form.unit || undefined,
@@ -86,11 +93,18 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
       className="fade-in-up"
       style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
         <div>
           <label style={label}>Activity</label>
           <select value={form.activity_type} onChange={(e) => setActivity(e.target.value as Category)} style={field}>
             {CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={label}>Crop</label>
+          <select value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} style={field}>
+            <option value="">Unspecified</option>
+            {CROPS.map((c) => <option key={c} value={c} style={{ textTransform: 'capitalize' }}>{c[0].toUpperCase() + c.slice(1)}</option>)}
           </select>
         </div>
         <div>
