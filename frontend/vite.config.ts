@@ -8,6 +8,16 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Guard against stale workers in production: an updated worker deletes the
+      // precache from previous builds rather than leaving it to serve old
+      // assets. (registerType 'autoUpdate' already applies skipWaiting +
+      // clientsClaim, so a new worker takes control immediately instead of
+      // waiting behind the old one.) devOptions is intentionally left disabled:
+      // we do NOT want a service worker in dev, since a dev worker can itself
+      // cache and shadow HMR. The dev-side orphan guard lives in src/main.tsx.
+      workbox: {
+        cleanupOutdatedCaches: true,
+      },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
         name: 'AgriProfit',
