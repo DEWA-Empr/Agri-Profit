@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Text, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Text, JSON, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..core.enums import Category, TransactionType
@@ -30,6 +30,33 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     farm = relationship("Farm", back_populates="users")
+
+
+class ShareToken(Base):
+    """A revocable, read-only capability granting an investor/lender access to a
+    single farm's P&L + yield report without an account (ticket 05).
+
+    Only a SHA-256 hash of the token is stored — the raw token is shown to the
+    owner exactly once, at mint time. A database compromise therefore cannot
+    reveal a usable share link (sha256 is preimage-resistant), which is the
+    point of a trusted data-sharing story: the secret lives only in the URL the
+    owner chooses to share.
+
+    The token is bound to a farm solely by this row's farm_id; the public report
+    endpoint derives the farm from the token and never accepts a farm from the
+    caller, so a token cannot address any farm but its own.
+    """
+    __tablename__ = "share_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False, index=True)
+    # SHA-256 hex digest of the opaque token; unique so lookup is exact.
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    label = Column(String, nullable=True)  # optional note, e.g. "First Bank"
+    revoked = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    farm = relationship("Farm")
 
 
 class OperationalLog(Base):

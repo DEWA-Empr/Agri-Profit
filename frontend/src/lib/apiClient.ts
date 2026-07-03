@@ -11,6 +11,9 @@ import type {
   PnlReport,
   MonthlyPnlPoint,
   DssDecisionSupport,
+  ShareLink,
+  ShareLinkMinted,
+  InvestorReport,
 } from '../types/domain';
 import { getToken, clearToken } from './authToken';
 
@@ -114,6 +117,15 @@ export const reportsService = {
   getMonthlyPnl: () => api.get<MonthlyPnlPoint[]>('/reports/pnl/monthly'),
   // Direct URL for the CSV download (served with a Content-Disposition header).
   pnlCsvUrl: () => `${api.defaults.baseURL}/reports/pnl.csv`,
+};
+
+// Investor share links (ticket 05). Owner routes are authenticated; getReport is
+// the public, token-only read an investor opens — no login required.
+export const shareService = {
+  listLinks: () => api.get<ShareLink[]>('/share/links'),
+  createLink: (label?: string) => api.post<ShareLinkMinted>('/share/links', { label: label || null }),
+  revokeLink: (id: number) => api.post<ShareLink>(`/share/links/${id}/revoke`),
+  getReport: (token: string) => api.get<InvestorReport>(`/share/report/${token}`),
 };
 
 export default api;

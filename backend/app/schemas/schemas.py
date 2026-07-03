@@ -154,3 +154,28 @@ class MaintenanceLog(MaintenanceLogBase):
     id: int
     service_date: datetime
     model_config = ConfigDict(from_attributes=True)
+
+# --- Investor share-link Schemas (ticket 05) ---
+class ShareLinkCreate(BaseModel):
+    label: Optional[str] = None
+
+class ShareLink(BaseModel):
+    """Owner-facing metadata for a share link. Never carries the token — only
+    its hash is stored, so an existing link's secret cannot be re-read."""
+    id: int
+    label: Optional[str] = None
+    revoked: bool
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+class ShareLinkMinted(ShareLink):
+    """The mint response — the ONLY place the raw token is ever returned."""
+    token: str
+
+# The public, read-only report an investor sees. P&L reuses the standard report;
+# crops reuse the deterministic per-crop metrics (for the yield figures).
+class InvestorReport(BaseModel):
+    farm_name: str
+    generated_at: datetime
+    pnl: PnlReport
+    crops: List[DSSCropMetrics]

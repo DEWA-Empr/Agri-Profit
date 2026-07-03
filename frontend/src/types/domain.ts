@@ -103,6 +103,29 @@ export interface DssDecisionSupport {
   overall: { revenue: number; expenses: number; gross_margin: number };
 }
 
+// --- Investor share links (ticket 05) ---
+// Owner-facing metadata for a share link. The token is NEVER present here — only
+// its hash is stored server-side — so a lost link must be re-minted.
+export interface ShareLink {
+  id: number;
+  label?: string | null;
+  revoked: boolean;
+  created_at: string;
+}
+
+// The mint response is the only place the raw token is ever returned.
+export interface ShareLinkMinted extends ShareLink {
+  token: string;
+}
+
+// The public read-only report an investor sees from a shared link.
+export interface InvestorReport {
+  farm_name: string;
+  generated_at: string;
+  pnl: PnlReport;
+  crops: DssCropMetrics[];
+}
+
 // --- Create payloads (request bodies) ---
 
 export interface FinancialTransactionCreate {

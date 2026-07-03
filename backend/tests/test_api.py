@@ -388,3 +388,114 @@ def test_equipment_isolation_cross_farm_read_rejected(make_client):
     # Farm A still owns and can service it.
     assert len(farm_a.get("/api/v1/equipment/").json()) == 1
     assert farm_a.get(f"/api/v1/equipment/{eq_id}/maintenance").status_code == 200
+
+
+# --- Investor share links (ticket 05) ------------------------------------
+
+def _seed_maize(client):
+    # fertilizer debit 25,000; yield credit 40,000 over 12 bags.
+    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit").status_code == 200
+    assert _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags").status_code == 200
+
+
+def test_share_link_mint_and_public_report(make_client, anon_client):
+    farm = make_client(farm_name="Sunrise Farm")
+    _seed_maize(farm)
+
+    minted = farm.post("/api/v1/share/links", json={"label": "First Bank"})
+    assert minted.status_code == 201
+    body = minted.json()
+    token = body["token"]
+    # Opaque: long, and not the row id / a sequential integer.
+    assert len(token) >= 40
+    assert token != str(body["id"]) and not token.isdigit()
+
+    # The list endpoint never re-serves the token, only metadata.
+    listed = farm.get("/api/v1/share/links").json()
+    assert len(listed) == 1
+    assert "token" not in listed[0]
+    assert listed[0]["label"] == "First Bank" and listed[0]["revoked"] is False
+
+    # The public report needs no login — the token is the credential.
+    report = anon_client.get(f"/api/v1/share/report/{token}")
+    assert report.status_code == 200
+    data = report.json()
+    assert data["farm_name"] == "Sunrise Farm"
+    assert data["pnl"]["revenue"] == 40000.0
+    assert data["pnl"]["expenses"] == 25000.0
+    assert data["pnl"]["gross_margin"] == 15000.0
+    maize = next(c for c in data["crops"] if c["crop"] == "maize")
+    assert maize["yield_quantity"] == 12.0
+    assert maize["yield_unit"] == "bags"
+    assert maize["gross_margin"] == 15000.0
+
+
+def test_share_report_revoked_token_denied(make_client, anon_client):
+    farm = make_client(farm_name="Sunrise Farm")
+    _seed_maize(farm)
+    minted = farm.post("/api/v1/share/links", json={}).json()
+    token, link_id = minted["token"], minted["id"]
+
+    # Works before revocation...
+    assert anon_client.get(f"/api/v1/share/report/{token}").status_code == 200
+    # ...revoke...
+    revoked = farm.post(f"/api/v1/share/links/{link_id}/revoke")
+    assert revoked.status_code == 200 and revoked.json()["revoked"] is True
+    # ...and the link is dead.
+    assert anon_client.get(f"/api/v1/share/report/{token}").status_code == 404
+
+
+def test_share_link_isolation_between_farms(make_client, anon_client):
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    _seed_maize(farm_a)  # A: revenue 40,000 / expenses 25,000
+    assert _post_crop_log(farm_b, activity_type="labour", crop="rice", amount=99999.0, transaction_type="debit").status_code == 200
+
+    token_a = farm_a.post("/api/v1/share/links", json={}).json()["token"]
+
+    # A's token returns A's data only — B's figures can never appear, because the
+    # farm is derived from the token row, not from the request.
+    data = anon_client.get(f"/api/v1/share/report/{token_a}").json()
+    assert data["farm_name"] == "Farm A"
+    assert data["pnl"]["revenue"] == 40000.0
+    assert data["pnl"]["expenses"] == 25000.0  # not 25,000 + 99,999
+    assert {c["crop"] for c in data["crops"]} == {"maize"}
+
+
+def test_share_unauthenticated_cannot_mint(anon_client):
+    assert anon_client.post("/api/v1/share/links", json={"label": "x"}).status_code == 401
+
+
+def test_share_revoke_scoped_to_owner(make_client, anon_client):
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    _seed_maize(farm_a)
+    minted = farm_a.post("/api/v1/share/links", json={}).json()
+    token_a, link_id = minted["token"], minted["id"]
+
+    # Farm B cannot revoke Farm A's link (another farm's id is "not found")...
+    assert farm_b.post(f"/api/v1/share/links/{link_id}/revoke").status_code == 404
+    # ...so A's link still works.
+    assert anon_client.get(f"/api/v1/share/report/{token_a}").status_code == 200
+
+
+def test_share_token_cannot_write_or_use_other_routes(make_client, anon_client):
+    farm = make_client(farm_name="Sunrise Farm")
+    _seed_maize(farm)
+    token = farm.post("/api/v1/share/links", json={}).json()["token"]
+
+    # A share token is not a login credential: presenting it as a bearer token
+    # authenticates nothing, so no write (or read) domain route accepts it.
+    write = anon_client.post(
+        "/api/v1/ledger/logs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "activity_type": "seed",
+            "financial_data": {"amount": 1.0, "transaction_type": "debit", "category": "seed"},
+        },
+    )
+    assert write.status_code == 401
+    assert anon_client.get("/api/v1/ledger/logs", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+    # The public report route itself is read-only — no write method.
+    assert anon_client.post(f"/api/v1/share/report/{token}").status_code == 405

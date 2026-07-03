@@ -7,6 +7,8 @@ passlib 1.7.4 (its last release) cannot read the version of the installed
 bcrypt 5.x and raises spurious errors, so the thin, stable bcrypt API is the
 more durable choice for the same algorithm.
 """
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -50,3 +52,25 @@ def decode_token(token: str) -> str | None:
     except JWTError:
         return None
     return payload.get("sub")
+
+
+# --- Share tokens (ticket 05) ---
+def generate_share_token() -> str:
+    """A long, opaque, cryptographically-random share token (256 bits).
+
+    URL-safe and unguessable — this is the secret embedded in an investor link.
+    Only its hash is persisted (see hash_share_token); the raw value is shown to
+    the owner once at mint time and never again.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def hash_share_token(token: str) -> str:
+    """SHA-256 hex digest of a share token — what we store and look up by.
+
+    A plain (unsalted) hash is deliberate: lookups must find a row by the token
+    alone, and the 256-bit random input already makes precomputation/brute force
+    infeasible, so a per-row salt would only break lookups without adding
+    meaningful strength.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
