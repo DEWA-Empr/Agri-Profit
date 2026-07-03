@@ -4,7 +4,9 @@ WORKDIR /code
 
 COPY ./requirements.txt /code/requirements.txt
 
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+# The large ML wheels (scikit-learn/pandas/numpy) can exceed pip's default 15s
+# read timeout on a slow link; be patient and retry rather than failing the build.
+RUN pip install --no-cache-dir --upgrade --timeout 120 --retries 5 -r /code/requirements.txt
 
 COPY ./alembic.ini /code/alembic.ini
 COPY ./alembic /code/alembic
