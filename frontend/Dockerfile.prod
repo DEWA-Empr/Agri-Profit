@@ -1,0 +1,23 @@
+# Production build of the PWA, served by `vite preview`. Unlike the dev
+# Dockerfile (which runs `vite dev` with no service worker), this builds the app
+# so the generated service worker — and its runtime caching for offline reads
+# (ticket 06) — is active. Use this image to exercise offline behaviour in a
+# real installed/served PWA.
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install
+
+COPY . .
+
+# Produces dist/ including the service worker (dist/sw.js) with the API runtime
+# caching routes baked in.
+RUN npm run build
+
+EXPOSE 4173
+
+# --host binds 0.0.0.0 so the port is reachable from the host.
+CMD ["npm", "run", "preview", "--", "--host", "--port", "4173"]

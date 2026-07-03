@@ -28,5 +28,22 @@ services:
     depends_on:
       - backend
 
+  # Production build of the PWA served by `vite preview`, so the service worker
+  # (and its offline-read runtime caching, ticket 06) is actually active — the
+  # dev `frontend` above runs no worker. Behind the "prod" profile so it does not
+  # start by default or collide with the dev server:
+  #   docker compose --profile prod up -d --build frontend-prod
+  # Served on http://localhost:4173 (that origin is in the backend CORS list).
+  frontend-prod:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "4173:4173"
+    depends_on:
+      - backend
+    profiles:
+      - prod
+
 volumes:
   postgres_data:

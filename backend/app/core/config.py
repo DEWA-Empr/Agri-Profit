@@ -15,9 +15,14 @@ class Settings(BaseSettings):
 
     # Frontend origins permitted to call the API (CORS). Set CORS_ORIGINS as a
     # JSON array to override, e.g. '["https://app.example.com"]'.
+    # 5173 = vite dev server; 4173 = production `vite preview` (the frontend-prod
+    # container used to exercise offline reads — ticket 06). Cross-origin API
+    # responses must be CORS-allowed here or the service worker can't cache them.
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
     ]
 
     # JWT signing. The default below is for local dev / CI only — production MUST
