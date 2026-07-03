@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FC, ReactNode } from 'react';
 import { authService, setUnauthorizedHandler } from '../../lib/apiClient';
 import { getToken, setToken as persistToken, clearToken } from '../../lib/authToken';
+import { purgeApiReadCache } from '../../lib/apiCache';
 import { AuthContext, type AuthContextValue } from './useAuth';
 
 // Auth state for the whole app. The token lives in localStorage (see
@@ -12,11 +13,16 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [token, setTokenState] = useState<string | null>(() => getToken());
 
   const applyToken = useCallback((value: string) => {
+    // Drop any offline-read cache left by a previous account before this farm's
+    // requests can be served from it (see lib/apiCache).
+    void purgeApiReadCache();
     persistToken(value);
     setTokenState(value);
   }, []);
 
   const logout = useCallback(() => {
+    // Clear this farm's cached reads so they can't be served to the next account.
+    void purgeApiReadCache();
     clearToken();
     setTokenState(null);
   }, []);

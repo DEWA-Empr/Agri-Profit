@@ -35,7 +35,9 @@ export const SyncStatus: FC<{ isOnline: boolean; pendingCount: number }> = ({ is
       {!isOnline && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 8px', backgroundColor: 'rgba(160,92,0,0.15)', borderRadius: '6px' }}>
           <WifiOff size={11} color={colors.warnAccent} />
-          <span style={{ color: colors.warnAccent, fontSize: '10px', fontWeight: '600' }}>Offline</span>
+          {/* Reads are served from the service-worker cache while offline
+              (ticket 06), so tell the farmer the figures are saved, not live. */}
+          <span style={{ color: colors.warnAccent, fontSize: '10px', fontWeight: '600' }}>Offline · showing saved data</span>
         </div>
       )}
       {pendingCount > 0 && (
