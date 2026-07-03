@@ -1,7 +1,8 @@
 import type { FC } from 'react';
-import { Download, Plus } from 'lucide-react';
+import { Download, Plus, LogOut } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { downloadPnlCsv } from '../../features/reports/downloadPnlCsv';
+import { useAuth } from '../../features/auth/useAuth';
 import { colors } from '../../styles/theme';
 
 // The header is the single, contextual page-title bar: its title and subtitle
@@ -23,6 +24,7 @@ const pageMeta: Record<string, { title: string; subtitle: string }> = {
 
 export const Header: FC = () => {
   const { pathname } = useLocation();
+  const { logout } = useAuth();
   const meta = pageMeta[pathname] ?? pageMeta['/'];
   const isDashboard = pathname === '/';
 
@@ -32,16 +34,21 @@ export const Header: FC = () => {
         <h2 style={{ fontSize: '17px', fontWeight: '500', color: colors.textStrong, letterSpacing: '-0.3px' }}>{meta.title}</h2>
         <p style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>{meta.subtitle}</p>
       </div>
-      {isDashboard && (
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={downloadPnlCsv} style={{ padding: '7px 14px', border: `0.5px solid ${colors.borderInput}`, borderRadius: '8px', backgroundColor: colors.surface, color: '#444', fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-            <Download size={14} /> Export
-          </button>
-          <Link to="/records" style={{ padding: '7px 14px', background: colors.primaryDark, color: colors.onPrimary, borderRadius: '8px', fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', border: 'none', textDecoration: 'none' }}>
-            <Plus size={14} /> Add Record
-          </Link>
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        {isDashboard && (
+          <>
+            <button onClick={downloadPnlCsv} style={{ padding: '7px 14px', border: `0.5px solid ${colors.borderInput}`, borderRadius: '8px', backgroundColor: colors.surface, color: '#444', fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <Download size={14} /> Export
+            </button>
+            <Link to="/records" style={{ padding: '7px 14px', background: colors.primaryDark, color: colors.onPrimary, borderRadius: '8px', fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', border: 'none', textDecoration: 'none' }}>
+              <Plus size={14} /> Add Record
+            </Link>
+          </>
+        )}
+        <button onClick={logout} title="Sign out" style={{ padding: '7px 12px', border: `0.5px solid ${colors.borderInput}`, borderRadius: '8px', backgroundColor: colors.surface, color: colors.textMuted, fontSize: '12px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer' }}>
+          <LogOut size={14} /> Sign out
+        </button>
+      </div>
     </header>
   );
 };

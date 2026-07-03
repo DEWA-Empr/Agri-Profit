@@ -12,6 +12,7 @@ import type {
   MonthlyPnlPoint,
   DssDecisionSupport,
 } from '../types/domain';
+import { getToken, clearToken } from './authToken';
 
 // The single axios instance for the whole app. Components and feature api
 // modules import from here — nothing constructs raw axios calls or hardcodes
@@ -24,6 +25,48 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Attach the bearer token (if any) to every request, so all domain calls are
+// authenticated without each caller having to remember to add the header.
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// A 401 means the token is missing/expired/invalid: drop it and send the user
+// back to the login screen. `onUnauthorized` is wired up by the AuthProvider so
+// this module stays free of React/router imports.
+let onUnauthorized: (() => void) | null = null;
+export const setUnauthorizedHandler = (handler: () => void) => {
+  onUnauthorized = handler;
+};
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      clearToken();
+      onUnauthorized?.();
+    }
+    return Promise.reject(error);
+  },
+);
+
+// Auth endpoints. Register creates a farm + first user; both return a JWT.
+export interface AuthToken {
+  access_token: string;
+  token_type: string;
+}
+
+export const authService = {
+  register: (data: { email: string; password: string; farm_name?: string }) =>
+    api.post<AuthToken>('/auth/register', data),
+  login: (data: { email: string; password: string }) =>
+    api.post<AuthToken>('/auth/login', data),
+};
 
 // Request/response payloads are typed against types/domain.ts — the shared
 // mirror of the backend Pydantic schemas (STRUCTURE.md §5).

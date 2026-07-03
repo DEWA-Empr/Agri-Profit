@@ -1,3 +1,5 @@
+import itertools
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -30,13 +32,58 @@ def db():
         engine.dispose()
 
 
+# --- Auth-aware clients ---------------------------------------------------
+# All domain endpoints now require a bearer token scoped to a farm. `make_client`
+# is a factory that registers a fresh farm/user against the SHARED test db and
+# returns a TestClient with its Authorization header preset. Because every client
+# built here is bound to the same `db` fixture instance, two clients model two
+# tenants sharing one database — exactly what the isolation tests need.
+
+_email_seq = itertools.count(1)
+
+
 @pytest.fixture(scope="function")
-def client(db):
+def make_client(db):
     def override_get_db():
-        try:
-            yield db
-        finally:
-            pass
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    created: list[TestClient] = []
+
+    def _make(email: str | None = None, password: str = "secret-password", farm_name: str | None = None):
+        email = email or f"farmer-{next(_email_seq)}@test.example"
+        c = TestClient(app)
+        c.__enter__()  # trigger startup events (trains the DSS model) like `with`
+        created.append(c)
+        resp = c.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": password, "farm_name": farm_name},
+        )
+        assert resp.status_code == 201, resp.text
+        token = resp.json()["access_token"]
+        c.headers.update({"Authorization": f"Bearer {token}"})
+        return c
+
+    yield _make
+
+    for c in created:
+        c.__exit__(None, None, None)
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture(scope="function")
+def client(make_client):
+    """The default authenticated client (one farm). Existing domain tests use
+    this unchanged — they simply now run as an authenticated farm."""
+    return make_client(farm_name="Farm A")
+
+
+@pytest.fixture(scope="function")
+def anon_client(db):
+    """An unauthenticated client, for register/login and 401-rejection tests."""
+    def override_get_db():
+        yield db
+
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as c:
         yield c

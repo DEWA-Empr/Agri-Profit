@@ -26,11 +26,12 @@ from . import reports_service
 UNSPECIFIED = "Unspecified"
 
 
-def get_decision_support(db: Session) -> dict:
+def get_decision_support(db: Session, farm_id: int) -> dict:
     """Compute per-crop unit cost of production and gross margin from the ledger.
 
     Reuses reports_service.get_pnl_report for the farm-wide top line so the
     overall figures are the single source of truth shared with the P&L report.
+    Scoped to a single farm.
     """
     # Only paired logs carry a crop and a financial consequence, so join on the
     # financial transaction (inner join drops any unpaired log defensively).
@@ -40,6 +41,7 @@ def get_decision_support(db: Session) -> dict:
             models.FinancialTransaction,
             models.OperationalLog.financial_transaction_id == models.FinancialTransaction.id,
         )
+        .filter(models.OperationalLog.farm_id == farm_id)
         .all()
     )
 
@@ -76,7 +78,7 @@ def get_decision_support(db: Session) -> dict:
             "unit_cost_of_production": unit_cost,
         })
 
-    pnl = reports_service.get_pnl_report(db)
+    pnl = reports_service.get_pnl_report(db, farm_id)
     return {
         "crops": crops,
         "overall": {

@@ -20,6 +20,13 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
 
+    # JWT signing. The default below is for local dev / CI only — production MUST
+    # override SECRET_KEY with a strong random value (tokens signed with the
+    # public default would otherwise be forgeable).
+    secret_key: str = "dev-insecure-secret-change-me-in-production"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24  # 24h
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

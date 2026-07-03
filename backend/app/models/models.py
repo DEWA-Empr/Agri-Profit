@@ -4,16 +4,47 @@ from sqlalchemy.sql import func
 from ..core.enums import Category, TransactionType
 from .database import Base
 
+
+class Farm(Base):
+    """A tenant. Every domain record belongs to exactly one farm, and a user
+    only ever sees rows carrying their own farm_id (the data boundary of
+    Objective 3). Pre-auth records are backfilled into a seeded "Legacy Farm"
+    by the auth migration so no historical data is lost or leaked."""
+    __tablename__ = "farms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    users = relationship("User", back_populates="farm")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    # bcrypt hash via passlib — the plaintext password is never stored.
+    hashed_password = Column(String, nullable=False)
+    farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    farm = relationship("Farm", back_populates="users")
+
+
 class OperationalLog(Base):
     __tablename__ = "operational_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Owning tenant. NOT NULL: every log is stamped with the author's farm at
+    # creation, and all reads are filtered by it (see services/ledger_service).
+    farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False, index=True)
     activity_type = Column(Enum(Category), nullable=False)
     description = Column(Text)
     quantity = Column(Float)
     unit = Column(String)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    
+
     # Bioprocess parameters or custom data
     extra_data = Column(JSON, nullable=True) # e.g., {"drying_time": 48, "humidity": 12.5}
 
@@ -32,6 +63,9 @@ class FinancialTransaction(Base):
     __tablename__ = "financial_transactions"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Owning tenant. The P&L / monthly / DSS reports query this table directly,
+    # so it carries farm_id in its own right rather than only via its log.
+    farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False, index=True)
     amount = Column(Float, nullable=False)
     transaction_type = Column(Enum(TransactionType), nullable=False)
     category = Column(Enum(Category), nullable=False)
@@ -45,6 +79,7 @@ class Equipment(Base):
     __tablename__ = "equipment"
 
     id = Column(Integer, primary_key=True, index=True)
+    farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     model = Column(String)
     purchase_date = Column(DateTime)
@@ -55,9 +90,10 @@ class MaintenanceLog(Base):
     __tablename__ = "maintenance_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False, index=True)
     equipment_id = Column(Integer, ForeignKey("equipment.id"))
     service_date = Column(DateTime, server_default=func.now())
     description = Column(Text)
     cost = Column(Float)
-    
+
     equipment = relationship("Equipment")

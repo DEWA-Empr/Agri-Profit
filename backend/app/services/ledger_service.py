@@ -5,20 +5,24 @@ from ..schemas import schemas
 from . import reports_service
 
 
-def _find_by_client_id(db: Session, client_id: str):
+def _find_by_client_id(db: Session, farm_id: int, client_id: str):
+    # Scoped by farm: a client_id is only an idempotency match within the same
+    # tenant, so one farm's offline key can never surface another farm's row.
     return db.query(models.OperationalLog).filter(
-        models.OperationalLog.client_id == client_id
+        models.OperationalLog.farm_id == farm_id,
+        models.OperationalLog.client_id == client_id,
     ).first()
 
 
-def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
+def create_operational_log(db: Session, farm_id: int, log: schemas.OperationalLogCreate):
     # Fast path: this client_id was already persisted (a retried offline log).
     if log.client_id:
-        existing = _find_by_client_id(db, log.client_id)
+        existing = _find_by_client_id(db, farm_id, log.client_id)
         if existing:
             return existing
 
     financial_tx = models.FinancialTransaction(
+        farm_id=farm_id,
         amount=log.financial_data.amount,
         transaction_type=log.financial_data.transaction_type,
         category=log.financial_data.category,
@@ -29,6 +33,7 @@ def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
     db.flush()
 
     db_log = models.OperationalLog(
+        farm_id=farm_id,
         activity_type=log.activity_type,
         description=log.description,
         quantity=log.quantity,
@@ -47,23 +52,35 @@ def create_operational_log(db: Session, log: schemas.OperationalLogCreate):
         # outcome and return the row the winner created (200, not 500).
         db.rollback()
         if log.client_id:
-            existing = _find_by_client_id(db, log.client_id)
+            existing = _find_by_client_id(db, farm_id, log.client_id)
             if existing:
                 return existing
         raise
     db.refresh(db_log)
     return db_log
 
-def get_operational_logs(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.OperationalLog).offset(skip).limit(limit).all()
+def get_operational_logs(db: Session, farm_id: int, skip: int = 0, limit: int = 100):
+    return (
+        db.query(models.OperationalLog)
+        .filter(models.OperationalLog.farm_id == farm_id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
-def get_financial_transactions(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.FinancialTransaction).offset(skip).limit(limit).all()
+def get_financial_transactions(db: Session, farm_id: int, skip: int = 0, limit: int = 100):
+    return (
+        db.query(models.FinancialTransaction)
+        .filter(models.FinancialTransaction.farm_id == farm_id)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
-def calculate_gross_margin(db: Session):
+def calculate_gross_margin(db: Session, farm_id: int):
     # The P&L report is the single source of truth for revenue/expenses/margin;
     # the summary is just its top-line totals (without the category breakdown).
-    report = reports_service.get_pnl_report(db)
+    report = reports_service.get_pnl_report(db, farm_id)
     return {
         "revenue": report["revenue"],
         "expenses": report["expenses"],

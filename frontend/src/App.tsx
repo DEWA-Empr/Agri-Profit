@@ -3,8 +3,13 @@ import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { usePendingSync } from './hooks/usePendingSync';
 import { useRecordCount } from './hooks/useRecordCount';
 import { AppShell } from './app/layout/AppShell';
+import { AuthProvider } from './features/auth/AuthProvider';
+import { useAuth } from './features/auth/useAuth';
+import { Login } from './features/auth/Login';
 
-const App = () => {
+// The authenticated application. Rendered only once a token is present; every
+// API request it makes carries the bearer token via the axios interceptor.
+const AuthenticatedApp = () => {
   const isOnline = useOnlineStatus();
   const pendingCount = usePendingSync();
   const { count: recordCount, refresh: refreshRecordCount } = useRecordCount();
@@ -20,5 +25,18 @@ const App = () => {
     </Router>
   );
 };
+
+// The gate: an unauthenticated visitor sees the Login screen; a token (fresh or
+// restored from localStorage on reload) swaps in the full app.
+const Gate = () => {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <AuthenticatedApp /> : <Login />;
+};
+
+const App = () => (
+  <AuthProvider>
+    <Gate />
+  </AuthProvider>
+);
 
 export default App;

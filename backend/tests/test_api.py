@@ -275,3 +275,116 @@ def test_invalid_enum_activity(client):
     }
     response = client.post("/api/v1/ledger/logs", json=payload)
     assert response.status_code == 422 # Unprocessable Entity
+
+
+# --- Authentication -------------------------------------------------------
+
+def test_register_returns_token(anon_client):
+    resp = anon_client.post(
+        "/api/v1/auth/register",
+        json={"email": "grower@test.example", "password": "secret-password", "farm_name": "Sunrise Farm"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["token_type"] == "bearer"
+    assert body["access_token"]
+
+
+def test_register_rejects_duplicate_email(anon_client):
+    payload = {"email": "dupe@test.example", "password": "secret-password"}
+    assert anon_client.post("/api/v1/auth/register", json=payload).status_code == 201
+    # Second registration with the same email is a conflict, not a new account.
+    assert anon_client.post("/api/v1/auth/register", json=payload).status_code == 409
+
+
+def test_login_success_and_wrong_password(anon_client):
+    anon_client.post(
+        "/api/v1/auth/register",
+        json={"email": "login@test.example", "password": "correct-horse"},
+    )
+    ok = anon_client.post(
+        "/api/v1/auth/login",
+        json={"email": "login@test.example", "password": "correct-horse"},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["access_token"]
+
+    bad = anon_client.post(
+        "/api/v1/auth/login",
+        json={"email": "login@test.example", "password": "wrong-password"},
+    )
+    assert bad.status_code == 401
+
+
+def test_password_is_hashed_not_plaintext(anon_client, db):
+    from backend.app.models import models
+
+    anon_client.post(
+        "/api/v1/auth/register",
+        json={"email": "hash@test.example", "password": "plaintext-secret"},
+    )
+    user = db.query(models.User).filter(models.User.email == "hash@test.example").first()
+    assert user is not None
+    # The stored credential is a bcrypt hash — never the plaintext.
+    assert user.hashed_password != "plaintext-secret"
+    assert user.hashed_password.startswith("$2")  # bcrypt hash prefix
+
+
+def test_unauthenticated_request_rejected(anon_client):
+    # Every domain endpoint now requires a bearer token.
+    assert anon_client.get("/api/v1/ledger/logs").status_code == 401
+    assert anon_client.get("/api/v1/reports/pnl").status_code == 401
+    assert anon_client.get("/api/v1/dss/decision-support").status_code == 401
+    assert anon_client.get("/api/v1/equipment/").status_code == 401
+
+
+# --- Per-farm data boundary ----------------------------------------------
+
+def test_ledger_isolation_between_farms(make_client):
+    # Two tenants share one database; each must see only its own ledger.
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+
+    assert _post_log(farm_a, activity_type="yield", amount=40000.0, transaction_type="credit").status_code == 200
+
+    # Farm A sees its own row.
+    a_logs = farm_a.get("/api/v1/ledger/logs").json()
+    assert len(a_logs) == 1
+
+    # Farm B sees nothing of Farm A's — not in logs, transactions, or summary.
+    assert farm_b.get("/api/v1/ledger/logs").json() == []
+    assert farm_b.get("/api/v1/ledger/transactions").json() == []
+    b_summary = farm_b.get("/api/v1/ledger/summary").json()
+    assert b_summary == {"revenue": 0.0, "expenses": 0.0, "gross_margin": 0.0}
+
+    # And Farm A's P&L / DSS are unaffected by Farm B's empty ledger.
+    assert farm_a.get("/api/v1/reports/pnl").json()["revenue"] == 40000.0
+    assert farm_b.get("/api/v1/reports/pnl").json()["revenue"] == 0.0
+    assert farm_b.get("/api/v1/dss/decision-support").json()["crops"] == []
+
+
+def test_equipment_isolation_cross_farm_read_rejected(make_client):
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+
+    created = farm_a.post(
+        "/api/v1/equipment/",
+        json={"name": "Farm A Tractor", "purchase_price": 15000000.0, "depreciation_rate": 10.0},
+    )
+    assert created.status_code == 200
+    eq_id = created.json()["id"]
+
+    # Farm B cannot list Farm A's equipment...
+    assert farm_b.get("/api/v1/equipment/").json() == []
+    # ...nor read its maintenance (another farm's id is simply "not found").
+    assert farm_b.get(f"/api/v1/equipment/{eq_id}/maintenance").status_code == 404
+    # ...nor attach maintenance to it.
+    cross = farm_b.post(
+        "/api/v1/equipment/maintenance",
+        json={"equipment_id": eq_id, "description": "sabotage", "cost": 1.0},
+    )
+    assert cross.status_code == 404
+
+    # Farm A still owns and can service it.
+    assert len(farm_a.get("/api/v1/equipment/").json()) == 1
+    assert farm_a.get(f"/api/v1/equipment/{eq_id}/maintenance").status_code == 200

@@ -3,6 +3,29 @@ from datetime import datetime
 from typing import Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
 
+# --- Auth Schemas ---
+# Email is typed as a plain str (not pydantic EmailStr) to avoid pulling in the
+# optional email-validator dependency; uniqueness is enforced at the DB level.
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=8, description="At least 8 characters")
+    # Optional: a new tenant's display name; defaults to "<email>'s Farm".
+    farm_name: Optional[str] = None
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    farm_id: int
+    model_config = ConfigDict(from_attributes=True)
+
 # --- Financial Transaction Schemas ---
 class FinancialTransactionBase(BaseModel):
     amount: float

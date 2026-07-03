@@ -10,12 +10,13 @@ from ..core.enums import Category, TransactionType
 from ..models import models
 
 
-def get_pnl_report(db: Session) -> dict:
+def get_pnl_report(db: Session, farm_id: int) -> dict:
     """Assemble a Profit & Loss report from the financial ledger.
 
     Revenue is the sum of credit transactions, expenses the sum of debits,
     gross margin the difference. The breakdown reports revenue/expenses/net per
-    Activity Category so input costs and produce sales can be compared.
+    Activity Category so input costs and produce sales can be compared. Scoped
+    to a single farm.
     """
     rows = (
         db.query(
@@ -23,6 +24,7 @@ def get_pnl_report(db: Session) -> dict:
             models.FinancialTransaction.transaction_type,
             func.sum(models.FinancialTransaction.amount),
         )
+        .filter(models.FinancialTransaction.farm_id == farm_id)
         .group_by(
             models.FinancialTransaction.category,
             models.FinancialTransaction.transaction_type,
@@ -61,12 +63,13 @@ def get_pnl_report(db: Session) -> dict:
     }
 
 
-def get_monthly_pnl(db: Session, months: int = 6) -> list[dict]:
+def get_monthly_pnl(db: Session, farm_id: int, months: int = 6) -> list[dict]:
     """Revenue and expenses aggregated per month for the last `months` months.
 
     Aggregated in Python (not SQL) so it works identically on SQLite and
     Postgres without dialect-specific date functions. Months with no activity
-    are returned as zeros so the chart always shows a full window.
+    are returned as zeros so the chart always shows a full window. Scoped to a
+    single farm.
     """
     now = datetime.now(timezone.utc)
     year, month = now.year, now.month
@@ -85,7 +88,7 @@ def get_monthly_pnl(db: Session, months: int = 6) -> list[dict]:
         models.FinancialTransaction.timestamp,
         models.FinancialTransaction.transaction_type,
         models.FinancialTransaction.amount,
-    ).all()
+    ).filter(models.FinancialTransaction.farm_id == farm_id).all()
 
     for timestamp, tx_type, amount in rows:
         if timestamp is None:
@@ -108,9 +111,9 @@ def get_monthly_pnl(db: Session, months: int = 6) -> list[dict]:
     ]
 
 
-def generate_pnl_csv(db: Session) -> str:
+def generate_pnl_csv(db: Session, farm_id: int) -> str:
     """Render the P&L report as CSV text suitable for a file download."""
-    report = get_pnl_report(db)
+    report = get_pnl_report(db, farm_id)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
 
