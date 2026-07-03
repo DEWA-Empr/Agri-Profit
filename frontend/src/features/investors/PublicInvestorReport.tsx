@@ -33,7 +33,16 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
   );
 
   return (
-    <div style={{ minHeight: '100vh', width: '100%', background: colors.appBg, padding: '28px 20px' }}>
+    // This page renders outside the AppShell, and index.css sets
+    // `body { overflow: hidden }`, so the body never scrolls. We therefore make
+    // this root its own scroll container: a full-viewport-height box with
+    // overflow-y: auto, so long reports scroll at 100% zoom on desktop and
+    // mobile. (100dvh tracks the *dynamic* viewport so mobile browser chrome
+    // doesn't hide the bottom; height:100vh is the fallback for older engines.)
+    <div
+      className="scroll-container"
+      style={{ height: '100vh', maxHeight: '100dvh', width: '100%', overflowY: 'auto', WebkitOverflowScrolling: 'touch', background: colors.appBg, padding: '28px 20px' }}
+    >
       <div style={{ maxWidth: '860px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '18px' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
