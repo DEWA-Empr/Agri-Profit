@@ -15,11 +15,18 @@ def _find_by_client_id(db: Session, farm_id: int, client_id: str):
 
 
 def create_operational_log(db: Session, farm_id: int, log: schemas.OperationalLogCreate):
+    """Create a log + its paired transaction.
+
+    Returns ``(log, created)`` where ``created`` is False when an existing row is
+    returned for an idempotent replay (same client_id). The endpoint maps that to
+    200 (found) vs 201 (created) so a retried offline log isn't reported as a new
+    creation.
+    """
     # Fast path: this client_id was already persisted (a retried offline log).
     if log.client_id:
         existing = _find_by_client_id(db, farm_id, log.client_id)
         if existing:
-            return existing
+            return existing, False
 
     financial_tx = models.FinancialTransaction(
         farm_id=farm_id,
@@ -54,10 +61,10 @@ def create_operational_log(db: Session, farm_id: int, log: schemas.OperationalLo
         if log.client_id:
             existing = _find_by_client_id(db, farm_id, log.client_id)
             if existing:
-                return existing
+                return existing, False
         raise
     db.refresh(db_log)
-    return db_log
+    return db_log, True
 
 def get_operational_logs(db: Session, farm_id: int, skip: int = 0, limit: int = 100):
     return (

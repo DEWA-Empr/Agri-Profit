@@ -40,7 +40,7 @@ def test_create_log_with_financials(client):
         }
     }
     response = client.post("/api/v1/ledger/logs", json=payload)
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()
     assert data["activity_type"] == "fertilizer"
     assert data["financial_transaction_id"] is not None
@@ -48,8 +48,8 @@ def test_create_log_with_financials(client):
 
 def test_get_summary(client):
     # Seed a known debit and credit, then assert exact totals (self-contained).
-    assert _post_log(client, activity_type="fertilizer", amount=25000.0, transaction_type="debit").status_code == 200
-    assert _post_log(client, activity_type="yield", amount=40000.0, transaction_type="credit").status_code == 200
+    assert _post_log(client, activity_type="fertilizer", amount=25000.0, transaction_type="debit").status_code == 201
+    assert _post_log(client, activity_type="yield", amount=40000.0, transaction_type="credit").status_code == 201
 
     response = client.get("/api/v1/ledger/summary")
     assert response.status_code == 200
@@ -125,9 +125,9 @@ def test_dss_decision_support_computes_from_ledger(client):
     #          gross margin = 0 − 10,000                 = −₦10,000
     #          unit cost    = None (no yield → no divide by zero)
     #   overall gross margin = 15,000 + (−10,000)        = ₦5,000
-    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit").status_code == 200
-    assert _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags").status_code == 200
-    assert _post_crop_log(client, activity_type="labour", crop="rice", amount=10000.0, transaction_type="debit").status_code == 200
+    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit").status_code == 201
+    assert _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags").status_code == 201
+    assert _post_crop_log(client, activity_type="labour", crop="rice", amount=10000.0, transaction_type="debit").status_code == 201
 
     response = client.get("/api/v1/dss/decision-support")
     assert response.status_code == 200
@@ -161,7 +161,7 @@ def test_equipment_lifecycle(client):
         "depreciation_rate": 10.0
     }
     response = client.post("/api/v1/equipment/", json=eq_payload)
-    assert response.status_code == 200
+    assert response.status_code == 201
     eq_data = response.json()
     eq_id = eq_data["id"]
     assert eq_data["name"] == "Massey Ferguson 375"
@@ -173,7 +173,7 @@ def test_equipment_lifecycle(client):
         "cost": 50000.0
     }
     response = client.post("/api/v1/equipment/maintenance", json=maint_payload)
-    assert response.status_code == 200
+    assert response.status_code == 201
     maint_data = response.json()
     assert maint_data["equipment_id"] == eq_id
     assert maint_data["cost"] == 50000.0
@@ -202,8 +202,10 @@ def test_idempotent_log_creation(client):
     # Replaying the same client_id (an offline log flushed twice after a
     # dropped connection) must be idempotent: same id back, and — crucially —
     # exactly one record stored, with no double-booked financial transaction.
+    # The genuine creation is 201; the idempotent replay is 200 (found, not
+    # newly created).
     r1 = client.post("/api/v1/ledger/logs", json=payload)
-    assert r1.status_code == 200
+    assert r1.status_code == 201
     r2 = client.post("/api/v1/ledger/logs", json=payload)
     assert r2.status_code == 200
     assert r1.json()["id"] == r2.json()["id"]
@@ -345,7 +347,7 @@ def test_ledger_isolation_between_farms(make_client):
     farm_a = make_client(farm_name="Farm A")
     farm_b = make_client(farm_name="Farm B")
 
-    assert _post_log(farm_a, activity_type="yield", amount=40000.0, transaction_type="credit").status_code == 200
+    assert _post_log(farm_a, activity_type="yield", amount=40000.0, transaction_type="credit").status_code == 201
 
     # Farm A sees its own row.
     a_logs = farm_a.get("/api/v1/ledger/logs").json()
@@ -371,7 +373,7 @@ def test_equipment_isolation_cross_farm_read_rejected(make_client):
         "/api/v1/equipment/",
         json={"name": "Farm A Tractor", "purchase_price": 15000000.0, "depreciation_rate": 10.0},
     )
-    assert created.status_code == 200
+    assert created.status_code == 201
     eq_id = created.json()["id"]
 
     # Farm B cannot list Farm A's equipment...
@@ -394,8 +396,8 @@ def test_equipment_isolation_cross_farm_read_rejected(make_client):
 
 def _seed_maize(client):
     # fertilizer debit 25,000; yield credit 40,000 over 12 bags.
-    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit").status_code == 200
-    assert _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags").status_code == 200
+    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit").status_code == 201
+    assert _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags").status_code == 201
 
 
 def test_share_link_mint_and_public_report(make_client, anon_client):
@@ -449,7 +451,7 @@ def test_share_link_isolation_between_farms(make_client, anon_client):
     farm_a = make_client(farm_name="Farm A")
     farm_b = make_client(farm_name="Farm B")
     _seed_maize(farm_a)  # A: revenue 40,000 / expenses 25,000
-    assert _post_crop_log(farm_b, activity_type="labour", crop="rice", amount=99999.0, transaction_type="debit").status_code == 200
+    assert _post_crop_log(farm_b, activity_type="labour", crop="rice", amount=99999.0, transaction_type="debit").status_code == 201
 
     token_a = farm_a.post("/api/v1/share/links", json={}).json()["token"]
 
@@ -499,3 +501,45 @@ def test_share_token_cannot_write_or_use_other_routes(make_client, anon_client):
 
     # The public report route itself is read-only — no write method.
     assert anon_client.post(f"/api/v1/share/report/{token}").status_code == 405
+
+
+# --- Config hardening: secret-key startup guard (ticket 08) ---------------
+
+def test_default_secret_key_forbidden_in_production():
+    from pydantic import ValidationError
+    from backend.app.core.config import Settings, DEFAULT_SECRET_KEY
+
+    # Booting a real (non dev/test) environment on the public default key must
+    # fail fast rather than sign forgeable tokens with a key that is in the repo.
+    with pytest.raises(ValidationError):
+        Settings(secret_key=DEFAULT_SECRET_KEY, environment="production")
+
+
+def test_default_secret_key_allowed_in_dev():
+    from backend.app.core.config import Settings, DEFAULT_SECRET_KEY
+
+    # Negative case: the public default is tolerated in dev (no real data at
+    # risk), so this must NOT raise.
+    s = Settings(secret_key=DEFAULT_SECRET_KEY, environment="dev")
+    assert s.secret_key == DEFAULT_SECRET_KEY
+
+
+def test_real_secret_key_allowed_in_production():
+    from backend.app.core.config import Settings
+
+    # Negative case: a real key in production is the intended state, so booting
+    # must NOT raise.
+    s = Settings(secret_key="a-strong-random-production-secret", environment="production")
+    assert s.environment == "production"
+
+
+# --- Registration input validation (ticket 08) ---------------------------
+
+def test_register_rejects_invalid_email(anon_client):
+    # EmailStr rejects a malformed address at validation (422) before it can
+    # ever become an account identifier.
+    resp = anon_client.post(
+        "/api/v1/auth/register",
+        json={"email": "not-an-email", "password": "secret-password"},
+    )
+    assert resp.status_code == 422

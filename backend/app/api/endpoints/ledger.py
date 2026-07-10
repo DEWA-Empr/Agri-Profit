@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 from typing import List
 from ...models import models
@@ -9,9 +9,14 @@ from ..deps import get_current_user
 
 router = APIRouter(prefix="/ledger", tags=["ledger"])
 
-@router.post("/logs", response_model=schemas.OperationalLog)
-def create_log(log: schemas.OperationalLogCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    return ledger_service.create_operational_log(db=db, farm_id=current_user.farm_id, log=log)
+@router.post("/logs", response_model=schemas.OperationalLog, status_code=status.HTTP_201_CREATED)
+def create_log(log: schemas.OperationalLogCreate, response: Response, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    db_log, created = ledger_service.create_operational_log(db=db, farm_id=current_user.farm_id, log=log)
+    # Idempotent replay of an already-persisted client_id returns the existing
+    # row — 200 Found, not 201 Created.
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return db_log
 
 @router.get("/logs", response_model=List[schemas.OperationalLog])
 def read_logs(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):

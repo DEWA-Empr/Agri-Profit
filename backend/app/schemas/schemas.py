@@ -1,18 +1,20 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from datetime import datetime
 from typing import Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
 
 # --- Auth Schemas ---
-# Email is typed as a plain str (not pydantic EmailStr) to avoid pulling in the
-# optional email-validator dependency; uniqueness is enforced at the DB level.
 class RegisterRequest(BaseModel):
-    email: str = Field(..., min_length=3)
+    # EmailStr rejects malformed addresses at the edge (422) so an unvalidated
+    # free-text string can never become an account identifier.
+    email: EmailStr
     password: str = Field(..., min_length=8, description="At least 8 characters")
     # Optional: a new tenant's display name; defaults to "<email>'s Farm".
     farm_name: Optional[str] = None
 
 class LoginRequest(BaseModel):
+    # Plain str on purpose: login must not distinguish "malformed email" from
+    # "wrong credentials" — an unknown/invalid address simply fails to match.
     email: str
     password: str
 

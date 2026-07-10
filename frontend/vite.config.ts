@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+// Shared with the runtime purge helper (src/lib/apiCache.ts) so the SW writes and
+// the app purges the exact same cache name — one source of truth.
+import { API_READ_CACHE } from './src/lib/apiCacheConfig'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -32,7 +35,7 @@ export default defineConfig({
             handler: 'StaleWhileRevalidate',
             method: 'GET',
             options: {
-              cacheName: 'agriprofit-api-reads',
+              cacheName: API_READ_CACHE,
               cacheableResponse: { statuses: [200] },
               expiration: {
                 maxEntries: 64,
