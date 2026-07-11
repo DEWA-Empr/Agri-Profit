@@ -1,8 +1,16 @@
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from ..core.enums import TransactionType
+from ..core.exceptions import ConflictError, NotFoundError
 from ..models import models
 from ..schemas import schemas
 from . import reports_service
+
+# A reversing entry posts the opposite side of the ledger from the original.
+_OPPOSITE_TYPE = {
+    TransactionType.DEBIT: TransactionType.CREDIT,
+    TransactionType.CREDIT: TransactionType.DEBIT,
+}
 
 
 def _find_by_client_id(db: Session, farm_id: int, client_id: str):
@@ -65,6 +73,79 @@ def create_operational_log(db: Session, farm_id: int, log: schemas.OperationalLo
         raise
     db.refresh(db_log)
     return db_log, True
+
+def reverse_log(db: Session, farm_id: int, log_id: int):
+    """Reverse an operational log with an offsetting ("contra") entry.
+
+    Ledger records are immutable: rather than deleting a mistaken log, we post a
+    new log + contra Financial Transaction (opposite type, same amount and
+    category) so the pair nets to zero in the P&L while both stay visible. The
+    reversal log carries no crop/quantity, so it corrects the finances without
+    distorting operational (yield) analytics.
+
+    Farm-scoped: reversing a log that isn't this farm's raises NotFoundError
+    (404), so a reversal can never reach across tenants. An already-reversed log,
+    or a reversal entry itself, cannot be reversed (ConflictError, 409) — either
+    would over-correct the ledger.
+    """
+    original = (
+        db.query(models.OperationalLog)
+        .filter(
+            models.OperationalLog.farm_id == farm_id,
+            models.OperationalLog.id == log_id,
+        )
+        .first()
+    )
+    if original is None:
+        raise NotFoundError(f"Operational log {log_id} not found")
+
+    if original.reverses_id is not None:
+        raise ConflictError("A reversal entry cannot itself be reversed")
+
+    already_reversed = (
+        db.query(models.OperationalLog)
+        .filter(
+            models.OperationalLog.farm_id == farm_id,
+            models.OperationalLog.reverses_id == original.id,
+        )
+        .first()
+    )
+    if already_reversed is not None:
+        raise ConflictError(f"Operational log {log_id} has already been reversed")
+
+    source_tx = original.financial_transaction
+    if source_tx is None:
+        # Every app-created log is paired with a transaction; one without a
+        # transaction has no financial effect to offset.
+        raise ConflictError(f"Operational log {log_id} has no financial transaction to reverse")
+
+    contra_tx = models.FinancialTransaction(
+        farm_id=farm_id,
+        amount=source_tx.amount,
+        transaction_type=_OPPOSITE_TYPE[source_tx.transaction_type],
+        category=source_tx.category,
+        description=f"Reversal of transaction #{source_tx.id}",
+        tax_category=source_tx.tax_category,
+    )
+    db.add(contra_tx)
+    db.flush()
+
+    reversal_log = models.OperationalLog(
+        farm_id=farm_id,
+        activity_type=original.activity_type,
+        description=f"Reversal of log #{original.id}",
+        quantity=None,
+        unit=None,
+        crop=None,
+        extra_data=None,
+        reverses_id=original.id,
+        financial_transaction_id=contra_tx.id,
+    )
+    db.add(reversal_log)
+    db.commit()
+    db.refresh(reversal_log)
+    return reversal_log
+
 
 def get_operational_logs(db: Session, farm_id: int, skip: int = 0, limit: int = 100):
     return (

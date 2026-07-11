@@ -29,8 +29,12 @@ _Avoid_: Post-harvest activity, processing step
 ### Finance
 
 **Financial Transaction**:
-The monetary record automatically created alongside every Operational Log. Classified as either an expense (debit) or revenue (credit), tagged with an Activity Category and an optional Tax Category. The ledger is single-entry: there is no enforced debit/credit pairing.
+The monetary record automatically created alongside every Operational Log. Classified as either an expense (debit) or revenue (credit), tagged with an Activity Category and an optional Tax Category. The ledger is single-entry: there is no enforced debit/credit pairing. Financial Transactions are **immutable** — once recorded they are never edited or deleted; a mistaken entry is corrected only by a Reversal.
 _Avoid_: Ledger entry, accounting record, double-entry record
+
+**Reversal**:
+The correction mechanism for a mistaken Operational Log. Rather than deleting the log (records are immutable), a Reversal posts a new Operational Log paired with a *contra* Financial Transaction — the opposite type (debit↔credit) for the same amount and Activity Category — linked back to the original. Its net effect on Gross Margin is zero, and both the original and the Reversal remain visible in the audit trail. A Reversal carries no crop or quantity, so it corrects the finances without distorting yield analytics. An already-reversed log, or a Reversal itself, cannot be reversed again.
+_Avoid_: Delete, void, undo, cancel
 
 **Gross Margin**:
 Total revenue (sum of credit Financial Transactions) minus total expenses (sum of debit Financial Transactions). The primary financial health metric of the farm.

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 from typing import List
 from ...models import models
@@ -29,3 +29,32 @@ def read_transactions(skip: int = 0, limit: int = 100, db: Session = Depends(get
 @router.get("/summary")
 def get_summary(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     return ledger_service.calculate_gross_margin(db=db, farm_id=current_user.farm_id)
+
+
+@router.post("/logs/{log_id}/reverse", response_model=schemas.OperationalLog, status_code=status.HTTP_201_CREATED)
+def reverse_log(log_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    """Post an offsetting reversal for a mistaken log. Ledger records are never
+    deleted or edited — this is the only way to undo an entry, and it keeps both
+    the original and the reversal visible in the audit trail (see CONTEXT.md)."""
+    return ledger_service.reverse_log(db=db, farm_id=current_user.farm_id, log_id=log_id)
+
+
+# --- Immutability: the ledger does not support destructive deletes ---------
+# A mistaken record is corrected with a reversal (POST .../reverse), never
+# removed. These explicit DELETE routes exist only to answer with a clear 405
+# and a pointer to reversal, rather than a bare 404 — deletion is genuinely not
+# a supported operation on ledger resources, for anyone.
+_IMMUTABLE_DETAIL = (
+    "Ledger records are immutable and cannot be deleted. "
+    "POST /api/v1/ledger/logs/{id}/reverse to offset an entry instead."
+)
+
+
+@router.delete("/logs/{log_id}")
+def delete_log(log_id: int):
+    raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail=_IMMUTABLE_DETAIL)
+
+
+@router.delete("/transactions/{transaction_id}")
+def delete_transaction(transaction_id: int):
+    raise HTTPException(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, detail=_IMMUTABLE_DETAIL)

@@ -60,6 +60,8 @@ class OperationalLogCreate(OperationalLogBase):
 class OperationalLog(OperationalLogBase):
     id: int
     timestamp: datetime
+    # Set when this log is a reversing entry: the id of the log it offsets.
+    reverses_id: Optional[int] = None
     financial_transaction_id: Optional[int] = None
     financial_transaction: Optional[FinancialTransaction] = None
     model_config = ConfigDict(from_attributes=True)

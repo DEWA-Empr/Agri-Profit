@@ -82,6 +82,18 @@ class OperationalLog(Base):
 
     client_id = Column(String, unique=True, nullable=True, index=True)
 
+    # Reversal link (ticket 10): a reversing entry points at the log it offsets
+    # (self-referential FK). Ledger records are immutable — a mistaken log is
+    # never deleted or edited; a reversal creates an offsetting paired
+    # transaction so the full history stays visible and the P&L nets to zero.
+    reverses_id = Column(Integer, ForeignKey("operational_logs.id"), nullable=True, index=True)
+
+    # Audit columns (ticket 10). created_at is the immutable record birth and
+    # updated_at is stamped on any future mutation — distinct from `timestamp`,
+    # which is the domain event time the farmer is recording.
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
     # Link to financial transaction
     financial_transaction_id = Column(Integer, ForeignKey("financial_transactions.id"), nullable=True)
     financial_transaction = relationship("FinancialTransaction", back_populates="operational_log")
@@ -99,6 +111,12 @@ class FinancialTransaction(Base):
     description = Column(Text)
     tax_category = Column(String)  # For automated tax categorization
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Audit columns (ticket 10) — see OperationalLog. The financial ledger is
+    # append-only: a transaction is corrected by an offsetting reversal, never
+    # deleted or edited.
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     operational_log = relationship("OperationalLog", back_populates="financial_transaction", uselist=False)
 

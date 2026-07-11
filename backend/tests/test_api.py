@@ -582,3 +582,83 @@ def test_expired_jwt_rejected(client):
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {expired}"}
     )
     assert resp.status_code == 401
+
+
+# --- Ledger immutability + reversal (ticket 10) ---------------------------
+
+def test_ledger_delete_is_blocked(client):
+    # Ledger records are immutable: a hard DELETE of a log or its transaction is
+    # refused with 405, pointing the caller at reversal instead.
+    created = _post_log(client, activity_type="seed", amount=100.0, transaction_type="debit")
+    assert created.status_code == 201
+    log_id = created.json()["id"]
+    tx_id = created.json()["financial_transaction_id"]
+
+    assert client.delete(f"/api/v1/ledger/logs/{log_id}").status_code == 405
+    assert client.delete(f"/api/v1/ledger/transactions/{tx_id}").status_code == 405
+
+
+def test_reversal_nets_pnl_to_zero(client):
+    # A standalone expense moves the margin; its reversal returns margin — and
+    # the category's net — to zero, without deleting anything.
+    created = _post_log(client, activity_type="fertilizer", amount=250.0, transaction_type="debit")
+    log_id = created.json()["id"]
+
+    before = client.get("/api/v1/ledger/summary").json()
+    assert before["expenses"] == 250.0
+    assert before["gross_margin"] == -250.0
+
+    rev = client.post(f"/api/v1/ledger/logs/{log_id}/reverse")
+    assert rev.status_code == 201
+    assert rev.json()["reverses_id"] == log_id
+
+    after = client.get("/api/v1/ledger/summary").json()
+    assert after["gross_margin"] == 0.0
+
+    pnl = client.get("/api/v1/reports/pnl").json()
+    fertilizer = next(c for c in pnl["categories"] if c["category"] == "fertilizer")
+    assert fertilizer["net"] == 0.0
+
+
+def test_original_and_reversal_both_readable(client):
+    # Reversal is non-destructive: the original log AND the reversal entry both
+    # remain visible, and the reversal is linked back to what it offsets.
+    created = _post_log(client, activity_type="labour", amount=80.0, transaction_type="debit")
+    log_id = created.json()["id"]
+    rev = client.post(f"/api/v1/ledger/logs/{log_id}/reverse")
+    rev_id = rev.json()["id"]
+
+    logs = client.get("/api/v1/ledger/logs").json()
+    ids = {log["id"] for log in logs}
+    assert log_id in ids
+    assert rev_id in ids
+
+    reversal = next(log for log in logs if log["id"] == rev_id)
+    assert reversal["reverses_id"] == log_id
+
+
+def test_reversal_rejected_across_farms(make_client):
+    # A farm cannot reverse another farm's log — the log isn't even visible to
+    # it, so the attempt is a 404 (the tenant boundary, not a special-case).
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    created = _post_log(farm_a, activity_type="seed", amount=100.0, transaction_type="debit")
+    a_log_id = created.json()["id"]
+
+    resp = farm_b.post(f"/api/v1/ledger/logs/{a_log_id}/reverse")
+    assert resp.status_code == 404
+
+
+def test_double_reversal_rejected(client):
+    # Reversing an already-reversed log (or a reversal entry itself) would
+    # over-correct the ledger, so both are refused with 409.
+    created = _post_log(client, activity_type="seed", amount=100.0, transaction_type="debit")
+    log_id = created.json()["id"]
+
+    first = client.post(f"/api/v1/ledger/logs/{log_id}/reverse")
+    assert first.status_code == 201
+
+    assert client.post(f"/api/v1/ledger/logs/{log_id}/reverse").status_code == 409
+
+    rev_id = first.json()["id"]
+    assert client.post(f"/api/v1/ledger/logs/{rev_id}/reverse").status_code == 409
