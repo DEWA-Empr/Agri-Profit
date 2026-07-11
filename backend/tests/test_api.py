@@ -543,3 +543,42 @@ def test_register_rejects_invalid_email(anon_client):
         json={"email": "not-an-email", "password": "secret-password"},
     )
     assert resp.status_code == 422
+
+
+# --- JWT verification: forged and expired tokens (ticket 09) --------------
+
+def test_tampered_jwt_rejected(client):
+    # A correctly-formed token whose signature has been altered must be rejected.
+    # This proves protected routes verify the signature — not merely that *some*
+    # bearer token is present — so a forged token can't impersonate a farm.
+    valid = client.headers["Authorization"].split(" ", 1)[1]
+    header, payload, signature = valid.split(".")
+    # Flip the final signature character to a guaranteed-different one (staying in
+    # the base64url alphabet), so the HMAC no longer matches the payload.
+    forged_last = "A" if signature[-1] != "A" else "B"
+    tampered = f"{header}.{payload}.{signature[:-1]}{forged_last}"
+
+    resp = client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {tampered}"}
+    )
+    assert resp.status_code == 401
+
+
+def test_expired_jwt_rejected(client):
+    # A token signed with the *real* key but whose exp is in the past must be
+    # rejected. This proves expiry is enforced independently of the signature —
+    # a leaked-but-stale token can't be replayed indefinitely.
+    from datetime import datetime, timedelta, timezone
+    from jose import jwt
+    from backend.app.core.config import settings
+
+    payload = {
+        "sub": "1",
+        "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+    }
+    expired = jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+    resp = client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {expired}"}
+    )
+    assert resp.status_code == 401

@@ -29,7 +29,7 @@ jobs:
         run: python -m pytest backend/tests/ -v
 
   frontend:
-    name: Frontend build
+    name: Frontend tests & build
     runs-on: ubuntu-latest
 
     steps:
@@ -44,6 +44,10 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test
 
       - name: Type-check and build
         working-directory: frontend
