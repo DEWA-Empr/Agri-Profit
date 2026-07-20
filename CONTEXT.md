@@ -33,7 +33,7 @@ The monetary record automatically created alongside every Operational Log. Class
 _Avoid_: Ledger entry, accounting record, double-entry record
 
 **Reversal**:
-The correction mechanism for a mistaken Operational Log. Rather than deleting the log (records are immutable), a Reversal posts a new Operational Log paired with a *contra* Financial Transaction — the opposite type (debit↔credit) for the same amount and Activity Category — linked back to the original. Its net effect on Gross Margin is zero, and both the original and the Reversal remain visible in the audit trail. A Reversal carries no crop or quantity, so it corrects the finances without distorting yield analytics. An already-reversed log, or a Reversal itself, cannot be reversed again.
+The correction mechanism for a mistaken Operational Log. Rather than deleting the log (records are immutable), a Reversal posts a new Operational Log paired with a *contra* Financial Transaction — the **same** type (debit or credit), amount and Activity Category as the original — linked back to it. The reports subtract a Reversal from the same pile its type feeds, so a reversed expense returns that category's expenses to their prior value (and a reversed income returns its revenue), leaving the opposite pile *and* Gross Margin correct — not just the margin. Both the original and the Reversal remain visible in the audit trail. A Reversal carries no crop or quantity, so it corrects the finances without distorting yield analytics. An already-reversed log, or a Reversal itself, cannot be reversed again.
 _Avoid_: Delete, void, undo, cancel
 
 **Gross Margin**:

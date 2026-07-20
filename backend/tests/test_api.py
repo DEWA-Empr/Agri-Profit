@@ -614,10 +614,14 @@ def test_reversal_nets_pnl_to_zero(client):
 
     after = client.get("/api/v1/ledger/summary").json()
     assert after["gross_margin"] == 0.0
+    # 10b: category-preserving contra — the reversal nets within its own pile,
+    # so expenses return to zero (they are not offset by an inflated revenue).
+    assert after["expenses"] == 0.0
 
     pnl = client.get("/api/v1/reports/pnl").json()
     fertilizer = next(c for c in pnl["categories"] if c["category"] == "fertilizer")
     assert fertilizer["net"] == 0.0
+    assert fertilizer["expenses"] == 0.0
 
 
 def test_original_and_reversal_both_readable(client):
@@ -662,3 +666,66 @@ def test_double_reversal_rejected(client):
 
     rev_id = first.json()["id"]
     assert client.post(f"/api/v1/ledger/logs/{rev_id}/reverse").status_code == 409
+
+
+# --- Category-preserving reversal (ticket 10b) ---------------------------
+
+def test_reversal_leaves_revenue_untouched(client):
+    # 10b: reversing an expense nets that category's expenses to zero while
+    # revenue (a different pile) is left exactly as it was — the contra is the
+    # SAME type (debit), so it subtracts from expenses, not from revenue.
+    _post_log(client, activity_type="yield", amount=5000.0, transaction_type="credit")
+    expense = _post_log(client, activity_type="fertilizer", amount=2000.0, transaction_type="debit")
+    exp_id = expense.json()["id"]
+
+    before = client.get("/api/v1/ledger/summary").json()
+    assert before == {"revenue": 5000.0, "expenses": 2000.0, "gross_margin": 3000.0}
+
+    rev = client.post(f"/api/v1/ledger/logs/{exp_id}/reverse")
+    assert rev.status_code == 201
+    assert rev.json()["financial_transaction"]["transaction_type"] == "debit"  # same type
+
+    after = client.get("/api/v1/ledger/summary").json()
+    assert after["revenue"] == 5000.0    # untouched
+    assert after["expenses"] == 0.0      # netted within its own pile
+    assert after["gross_margin"] == 5000.0
+
+    pnl = client.get("/api/v1/reports/pnl").json()
+    fert = next(c for c in pnl["categories"] if c["category"] == "fertilizer")
+    assert fert["expenses"] == 0.0
+    assert fert["revenue"] == 0.0
+    assert fert["net"] == 0.0
+
+
+def test_reversal_of_income_leaves_expenses_untouched(client):
+    # 10b mirror: reversing an income nets revenue to zero, expenses untouched.
+    _post_log(client, activity_type="fertilizer", amount=2000.0, transaction_type="debit")
+    income = _post_log(client, activity_type="yield", amount=5000.0, transaction_type="credit")
+    inc_id = income.json()["id"]
+
+    rev = client.post(f"/api/v1/ledger/logs/{inc_id}/reverse")
+    assert rev.status_code == 201
+    assert rev.json()["financial_transaction"]["transaction_type"] == "credit"  # same type
+
+    after = client.get("/api/v1/ledger/summary").json()
+    assert after["expenses"] == 2000.0   # untouched
+    assert after["revenue"] == 0.0       # netted within its own pile
+    assert after["gross_margin"] == -2000.0
+
+
+def test_monthly_pnl_nets_reversal_in_month(client):
+    # 10b: the monthly series nets a reversal the same way, within its own month
+    # and its own pile (Python-side bucketing, no SQL date functions).
+    expense = _post_log(client, activity_type="fertilizer", amount=2000.0, transaction_type="debit")
+    _post_log(client, activity_type="yield", amount=5000.0, transaction_type="credit")
+    exp_id = expense.json()["id"]
+
+    current = client.get("/api/v1/reports/pnl/monthly").json()[-1]  # window ends this month
+    assert current["expenses"] == 2000.0
+    assert current["revenue"] == 5000.0
+
+    assert client.post(f"/api/v1/ledger/logs/{exp_id}/reverse").status_code == 201
+
+    current2 = client.get("/api/v1/reports/pnl/monthly").json()[-1]
+    assert current2["expenses"] == 0.0    # reversal subtracted in-month
+    assert current2["revenue"] == 5000.0  # untouched

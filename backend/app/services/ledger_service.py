@@ -1,16 +1,9 @@
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from ..core.enums import TransactionType
 from ..core.exceptions import ConflictError, NotFoundError
 from ..models import models
 from ..schemas import schemas
 from . import reports_service
-
-# A reversing entry posts the opposite side of the ledger from the original.
-_OPPOSITE_TYPE = {
-    TransactionType.DEBIT: TransactionType.CREDIT,
-    TransactionType.CREDIT: TransactionType.DEBIT,
-}
 
 
 def _find_by_client_id(db: Session, farm_id: int, client_id: str):
@@ -78,8 +71,11 @@ def reverse_log(db: Session, farm_id: int, log_id: int):
     """Reverse an operational log with an offsetting ("contra") entry.
 
     Ledger records are immutable: rather than deleting a mistaken log, we post a
-    new log + contra Financial Transaction (opposite type, same amount and
-    category) so the pair nets to zero in the P&L while both stay visible. The
+    new log + contra Financial Transaction (ticket 10b: the SAME transaction_type,
+    amount and category as the original) so the pair nets within its own pile.
+    The aggregates (reports_service) subtract a reversal from the same category
+    bucket its type feeds, so a reversed expense's Operating Cost returns to what
+    it was and Gross Revenue is left untouched — not just Gross Margin. The
     reversal log carries no crop/quantity, so it corrects the finances without
     distorting operational (yield) analytics.
 
@@ -122,7 +118,10 @@ def reverse_log(db: Session, farm_id: int, log_id: int):
     contra_tx = models.FinancialTransaction(
         farm_id=farm_id,
         amount=source_tx.amount,
-        transaction_type=_OPPOSITE_TYPE[source_tx.transaction_type],
+        # Category-preserving contra (ticket 10b): SAME type as the original.
+        # The reversal is identified as a contra by its log's reverses_id, and
+        # the aggregates subtract it from the pile its type feeds.
+        transaction_type=source_tx.transaction_type,
         category=source_tx.category,
         description=f"Reversal of transaction #{source_tx.id}",
         tax_category=source_tx.tax_category,

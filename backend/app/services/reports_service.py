@@ -18,23 +18,32 @@ def get_pnl_report(db: Session, farm_id: int) -> dict:
     Activity Category so input costs and produce sales can be compared. Scoped
     to a single farm.
     """
+    FT = models.FinancialTransaction
+    OL = models.OperationalLog
+    # A reversal is a category-preserving contra (ticket 10b): same type as the
+    # original, flagged by its log's reverses_id. That flag lives on
+    # operational_logs (1:1 with its transaction), so we LEFT JOIN to surface it
+    # and group by it as a boolean.
+    is_reversal = OL.reverses_id.isnot(None)
     rows = (
         db.query(
-            models.FinancialTransaction.category,
-            models.FinancialTransaction.transaction_type,
-            func.sum(models.FinancialTransaction.amount),
+            FT.category,
+            FT.transaction_type,
+            is_reversal.label("is_reversal"),
+            func.sum(FT.amount),
         )
-        .filter(models.FinancialTransaction.farm_id == farm_id)
-        .group_by(
-            models.FinancialTransaction.category,
-            models.FinancialTransaction.transaction_type,
-        )
+        .outerjoin(OL, OL.financial_transaction_id == FT.id)
+        .filter(FT.farm_id == farm_id)
+        .group_by(FT.category, FT.transaction_type, is_reversal)
         .all()
     )
 
     buckets = {c: {"revenue": 0.0, "expenses": 0.0} for c in Category}
-    for category, tx_type, total in rows:
-        amount = float(total or 0.0)
+    for category, tx_type, is_rev, total in rows:
+        # A contra subtracts from the SAME pile its type feeds, so a reversed
+        # expense nets its own Operating Cost to zero and leaves revenue
+        # untouched (and vice-versa) — not just Gross Margin.
+        amount = -float(total or 0.0) if is_rev else float(total or 0.0)
         if tx_type == TransactionType.CREDIT:
             buckets[category]["revenue"] += amount
         else:
@@ -84,22 +93,30 @@ def get_monthly_pnl(db: Session, farm_id: int, months: int = 6) -> list[dict]:
 
     buckets = {ym: {"revenue": 0.0, "expenses": 0.0} for ym in window}
 
-    rows = db.query(
-        models.FinancialTransaction.timestamp,
-        models.FinancialTransaction.transaction_type,
-        models.FinancialTransaction.amount,
-    ).filter(models.FinancialTransaction.farm_id == farm_id).all()
+    FT = models.FinancialTransaction
+    OL = models.OperationalLog
+    # LEFT JOIN operational_logs for reverses_id (see get_pnl_report). Bucketing
+    # stays in Python on purpose — no dialect-specific SQL date functions.
+    rows = (
+        db.query(FT.timestamp, FT.transaction_type, FT.amount, OL.reverses_id)
+        .outerjoin(OL, OL.financial_transaction_id == FT.id)
+        .filter(FT.farm_id == farm_id)
+        .all()
+    )
 
-    for timestamp, tx_type, amount in rows:
+    for timestamp, tx_type, amount, reverses_id in rows:
         if timestamp is None:
             continue
         key = (timestamp.year, timestamp.month)
         if key not in buckets:
             continue
+        # A reversal subtracts from the same pile its type feeds, in its own
+        # month (ticket 10b: category-preserving contra).
+        value = -float(amount or 0.0) if reverses_id is not None else float(amount or 0.0)
         if tx_type == TransactionType.CREDIT:
-            buckets[key]["revenue"] += float(amount or 0.0)
+            buckets[key]["revenue"] += value
         else:
-            buckets[key]["expenses"] += float(amount or 0.0)
+            buckets[key]["expenses"] += value
 
     return [
         {
