@@ -23,8 +23,24 @@ The measurable output from a crop or livestock production cycle. Recorded as an 
 _Avoid_: Harvest, output, produce
 
 **Bioprocess**:
-A post-harvest processing step applied to Yield before it reaches market (drying, starch hydrolysis, storage conditioning). Recorded as an Operational Log with Activity Category "Bioprocess" and optional structured parameters (e.g. drying time, humidity).
+A post-harvest processing step applied to Yield before it reaches market (drying, starch hydrolysis, storage conditioning). Recorded as an Operational Log with Activity Category "Bioprocess" and optional structured parameters (e.g. drying time, humidity). The first implemented process type is the Drying Run.
 _Avoid_: Post-harvest activity, processing step
+
+**Drying Run**:
+A single post-harvest drying operation on one crop lot, recorded as an Operational Log with Activity Category Bioprocess, carrying the lot's inlet and outlet mass, inlet and outlet moisture content, duration, air temperature and drying method.
+_Avoid_: Drying session, dry-down, batch
+
+**Moisture Content**:
+The mass fraction of water in a crop lot, entered on a **wet basis** (mass of water ÷ total mass) because that is what field moisture meters report and what buyers price against. Converted to dry basis internally for drying-kinetics modelling.
+_Avoid_: Humidity, water content, moisture level
+
+**Marketable Mass**:
+The outlet mass of a crop after its Drying Runs; the quantity the farm can actually sell. Where a crop has Drying Runs, unit cost of production is also reported against Marketable Mass, alongside the harvest-unit figure.
+_Avoid_: Net weight, final yield, saleable yield
+
+**Process Loss**:
+The difference between the outlet mass predicted by dry-matter conservation and the outlet mass actually recorded, attributable to spillage, handling and over-drying. A data-quality and efficiency signal, not a financial entry.
+_Avoid_: Shrinkage, wastage, drying loss
 
 ### Finance
 
