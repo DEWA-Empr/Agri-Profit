@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator, ValidationError
 from datetime import datetime
 from typing import Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
@@ -44,6 +44,51 @@ class FinancialTransaction(FinancialTransactionBase):
     timestamp: datetime
     model_config = ConfigDict(from_attributes=True)
 
+# --- Bioprocess: post-harvest drying parameters (ticket 08) ---
+# Carried in the OperationalLog.extra_data JSON column for BIOPROCESS logs only
+# (see docs/adr/0001). Moisture is entered on a WET basis (what a field meter
+# reads); the service layer converts to dry basis for kinetics. This is the
+# first place numeric bounds are enforced (LIMITATIONS §3) — every rejection is
+# a 422 at the schema edge, never a 500.
+class DryingReading(BaseModel):
+    time_hours: float = Field(..., gt=0, le=720)
+    moisture_wb: float = Field(..., gt=0, lt=100)
+
+
+class DryingParams(BaseModel):
+    process_type: Literal["DRYING"]
+    method: Literal["SUN", "SOLAR_DRYER", "MECHANICAL", "AMBIENT"]
+    mass_in_kg: float = Field(..., gt=0, le=100_000)
+    mass_out_kg: float = Field(..., gt=0)                 # <= mass_in_kg, enforced below
+    moisture_initial_wb: float = Field(..., gt=0, lt=100)
+    moisture_final_wb: float = Field(..., gt=0, lt=100)   # < initial, enforced below
+    drying_time_hours: float = Field(..., gt=0, le=720)
+    air_temperature_c: Optional[float] = Field(default=None, ge=-10, le=150)
+    readings: List[DryingReading] = []                    # optional intermediate points
+
+    @model_validator(mode="after")
+    def _check_physical_consistency(self) -> "DryingParams":
+        # Mass cannot increase during drying.
+        if self.mass_out_kg > self.mass_in_kg:
+            raise ValueError("mass_out_kg cannot exceed mass_in_kg")
+        # Drying removes water: the final moisture must be strictly below initial.
+        if self.moisture_final_wb >= self.moisture_initial_wb:
+            raise ValueError("moisture_final_wb must be less than moisture_initial_wb")
+        # readings (when present) must be strictly increasing in time, and every
+        # moisture must lie within the run's [final, initial] band (inclusive).
+        prev_t: Optional[float] = None
+        for r in self.readings:
+            if prev_t is not None and r.time_hours <= prev_t:
+                raise ValueError("readings must be strictly increasing in time_hours")
+            prev_t = r.time_hours
+            if not (self.moisture_final_wb <= r.moisture_wb <= self.moisture_initial_wb):
+                raise ValueError(
+                    "each reading moisture_wb must lie within "
+                    "[moisture_final_wb, moisture_initial_wb]"
+                )
+        return self
+
+
 # --- Operational Log Schemas ---
 class OperationalLogBase(BaseModel):
     activity_type: Category
@@ -56,6 +101,21 @@ class OperationalLogBase(BaseModel):
 
 class OperationalLogCreate(OperationalLogBase):
     financial_data: FinancialTransactionCreate
+
+    @model_validator(mode="after")
+    def _validate_bioprocess_payload(self) -> "OperationalLogCreate":
+        # Structured validation applies ONLY to Bioprocess logs. Every other
+        # activity type keeps extra_data as an arbitrary, unvalidated dict —
+        # exactly as before. A Bioprocess log must carry a valid drying payload;
+        # a missing or malformed one is a 422 at the edge, never a 500 (the
+        # nested ValidationError is re-raised as a ValueError so Pydantic folds
+        # it into this model's own validation error).
+        if self.activity_type == Category.BIOPROCESS:
+            try:
+                DryingParams.model_validate(self.extra_data)
+            except ValidationError as exc:
+                raise ValueError(f"Invalid Bioprocess drying parameters: {exc}") from exc
+        return self
 
 class OperationalLog(OperationalLogBase):
     id: int

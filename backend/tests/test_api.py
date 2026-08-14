@@ -729,3 +729,111 @@ def test_monthly_pnl_nets_reversal_in_month(client):
     current2 = client.get("/api/v1/reports/pnl/monthly").json()[-1]
     assert current2["expenses"] == 0.0    # reversal subtracted in-month
     assert current2["revenue"] == 5000.0  # untouched
+
+
+# --- Bioprocess drying: schema validation (ticket 08, Fixture D) ----------
+# Every malformed drying payload must be rejected at the schema edge with 422,
+# never reach the service and 500. Validation is conditional on
+# activity_type == bioprocess; all other activity types keep extra_data as an
+# arbitrary, unvalidated dict.
+
+def _valid_drying() -> dict:
+    """A physically consistent drying payload (Fixture A inputs); each test
+    mutates exactly one field so the 422 is attributable to that field alone."""
+    return {
+        "process_type": "DRYING",
+        "method": "SUN",
+        "mass_in_kg": 100.0,
+        "mass_out_kg": 84.0,
+        "moisture_initial_wb": 25.0,
+        "moisture_final_wb": 13.0,
+        "drying_time_hours": 10.0,
+    }
+
+
+def _post_bioprocess(client, extra_data: dict):
+    payload = {
+        "activity_type": "bioprocess",
+        "description": "maize drying run",
+        "crop": "maize",
+        "extra_data": extra_data,
+        # A bioprocess log is still paired with a transaction (0.00 for sun
+        # drying with own labour); the drying validation is what's under test.
+        "financial_data": {"amount": 0.0, "transaction_type": "debit", "category": "bioprocess"},
+    }
+    return client.post("/api/v1/ledger/logs", json=payload)
+
+
+def test_bioprocess_valid_payload_accepted(client):
+    # Positive control: the baseline payload is accepted and stored intact, so a
+    # 422 below is caused by the mutation, not a broken baseline.
+    resp = _post_bioprocess(client, _valid_drying())
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extra_data"]["process_type"] == "DRYING"
+    assert resp.json()["extra_data"]["mass_out_kg"] == 84.0
+
+
+def test_bioprocess_missing_payload_rejected(client):
+    # A bioprocess log with no drying parameters at all is invalid (422).
+    payload = {
+        "activity_type": "bioprocess",
+        "description": "no params",
+        "financial_data": {"amount": 0.0, "transaction_type": "debit", "category": "bioprocess"},
+    }
+    assert client.post("/api/v1/ledger/logs", json=payload).status_code == 422
+
+
+def test_bioprocess_mass_out_exceeds_mass_in_rejected(client):
+    d = _valid_drying(); d["mass_out_kg"] = 110.0  # > mass_in_kg (100) — mass gain
+    assert _post_bioprocess(client, d).status_code == 422
+
+
+def test_bioprocess_final_moisture_not_below_initial_rejected(client):
+    # moisture_final_wb >= moisture_initial_wb is wetting, not drying.
+    d = _valid_drying(); d["moisture_initial_wb"] = 20.0; d["moisture_final_wb"] = 25.0
+    assert _post_bioprocess(client, d).status_code == 422
+
+
+def test_bioprocess_nonpositive_mass_rejected(client):
+    d = _valid_drying(); d["mass_in_kg"] = -5.0
+    assert _post_bioprocess(client, d).status_code == 422
+    d = _valid_drying(); d["mass_out_kg"] = 0.0
+    assert _post_bioprocess(client, d).status_code == 422
+
+
+def test_bioprocess_moisture_out_of_range_rejected(client):
+    d = _valid_drying(); d["moisture_initial_wb"] = 105.0  # outside 0 < M < 100
+    assert _post_bioprocess(client, d).status_code == 422
+
+
+def test_bioprocess_readings_not_strictly_increasing_rejected(client):
+    d = _valid_drying()
+    # Times out of order (4h before 2h); moisture values are within the band, so
+    # only the ordering rule fires.
+    d["readings"] = [
+        {"time_hours": 4.0, "moisture_wb": 18.0},
+        {"time_hours": 2.0, "moisture_wb": 20.0},
+    ]
+    assert _post_bioprocess(client, d).status_code == 422
+
+
+def test_bioprocess_reading_outside_moisture_band_rejected(client):
+    d = _valid_drying()  # band is [13.0, 25.0]
+    d["readings"] = [{"time_hours": 2.0, "moisture_wb": 30.0}]  # above initial
+    assert _post_bioprocess(client, d).status_code == 422
+
+
+def test_non_bioprocess_log_keeps_arbitrary_extra_data(client):
+    # The critical no-regression guarantee: a non-bioprocess log carrying an
+    # arbitrary extra_data dict still succeeds and is stored unchanged. Drying
+    # validation must never touch it.
+    arbitrary = {"whatever": 123, "nested": {"a": [1, 2, 3]}, "note": "free-form"}
+    payload = {
+        "activity_type": "fertilizer",
+        "description": "arbitrary extra_data",
+        "extra_data": arbitrary,
+        "financial_data": {"amount": 100.0, "transaction_type": "debit", "category": "fertilizer"},
+    }
+    resp = client.post("/api/v1/ledger/logs", json=payload)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extra_data"] == arbitrary
