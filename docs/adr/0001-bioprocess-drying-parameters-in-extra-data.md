@@ -67,3 +67,19 @@ No new database table and no Alembic migration are introduced.
 - Derived metrics neglect equilibrium moisture content (`M_e`); the moisture
   ratio is `M_db(t) / M_db(0)`. This simplification is stated in the fitter's
   docstring and in LIMITATIONS.
+
+## Demonstration
+
+A seeded demo drying run lets the feature be shown live without typing during
+the defence. It is created through the real write path, not a direct database
+insert, so it is provably identical to a farmer's record:
+
+```
+# backend + db running:
+python backend/scripts/seed_bioprocess_demo.py
+```
+
+The script registers (or reuses) a "Demo Farm" and posts one Bioprocess drying
+run with a fixed `client_id`, so re-running is idempotent — the ledger returns
+the existing row rather than duplicating it. It prints the created log id and
+the `GET /bioprocess/{id}` URL to view the derived metrics.

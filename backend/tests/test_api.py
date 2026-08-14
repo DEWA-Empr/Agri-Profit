@@ -837,3 +837,128 @@ def test_non_bioprocess_log_keeps_arbitrary_extra_data(client):
     resp = client.post("/api/v1/ledger/logs", json=payload)
     assert resp.status_code == 201, resp.text
     assert resp.json()["extra_data"] == arbitrary
+
+
+# --- Bioprocess drying: read + aggregate endpoints (ticket 08, Phase 4) ----
+# Drying runs are created through the single existing write path
+# (POST /ledger/logs); the /bioprocess routes only read them back.
+
+def _drying_extra(**overrides) -> dict:
+    d = {
+        "process_type": "DRYING", "method": "SUN",
+        "mass_in_kg": 100.0, "mass_out_kg": 84.0,
+        "moisture_initial_wb": 25.0, "moisture_final_wb": 13.0,
+        "drying_time_hours": 10.0,
+    }
+    d.update(overrides)
+    return d
+
+
+def _post_drying(client, *, crop="maize", amount=0.0, extra=None):
+    payload = {
+        "activity_type": "bioprocess",
+        "description": f"{crop} drying run",
+        "crop": crop,
+        "extra_data": extra if extra is not None else _drying_extra(),
+        "financial_data": {"amount": amount, "transaction_type": "debit", "category": "bioprocess"},
+    }
+    return client.post("/api/v1/ledger/logs", json=payload)
+
+
+def test_bioprocess_create_zero_cost_still_pairs_transaction(client):
+    # Sun drying with own labour costs nothing, but the paired transaction is
+    # still created at 0.00 so the pairing invariant is never violated.
+    r = _post_drying(client, amount=0.0)
+    assert r.status_code == 201, r.text
+    assert r.json()["financial_transaction_id"] is not None
+    tx = r.json()["financial_transaction"]
+    assert tx["amount"] == 0.0
+    assert tx["transaction_type"] == "debit"
+    assert tx["category"] == "bioprocess"
+
+
+def test_bioprocess_detail_returns_params_and_metrics(client):
+    # Fixture A inputs, surfaced through the API: the detail view carries the
+    # stored params plus every derived metric.
+    created = _post_drying(client, crop="maize", extra=_drying_extra())
+    log_id = created.json()["id"]
+
+    resp = client.get(f"/api/v1/bioprocess/{log_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == log_id
+    assert data["crop"] == "maize"
+    assert data["params"]["mass_in_kg"] == 100.0
+    m = data["metrics"]
+    assert m["dry_matter_kg"] == pytest.approx(75.0, rel=1e-4)
+    assert m["process_loss_kg"] == pytest.approx(2.2069, rel=1e-4)
+    assert m["water_removed_kg"] == pytest.approx(16.0, rel=1e-4)
+    assert m["newton_k"] == pytest.approx(0.080235, rel=1e-4)
+    assert m["safe_storage"] is True
+    assert m["page"] is None
+
+
+def test_bioprocess_detail_cross_farm_is_404(make_client):
+    # Fixture E: another farm's drying run is simply not found.
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    log_id = _post_drying(farm_a).json()["id"]
+
+    assert farm_b.get(f"/api/v1/bioprocess/{log_id}").status_code == 404
+    assert farm_a.get(f"/api/v1/bioprocess/{log_id}").status_code == 200
+
+
+def test_bioprocess_detail_non_bioprocess_log_is_404(client):
+    # A non-bioprocess log is not a drying run.
+    created = _post_log(client, activity_type="fertilizer", amount=100.0, transaction_type="debit")
+    assert client.get(f"/api/v1/bioprocess/{created.json()['id']}").status_code == 404
+
+
+def test_bioprocess_detail_on_reversal_contra_is_404(client):
+    # A reversal contra carries no drying payload, so it is not a drying run.
+    created = _post_drying(client, crop="maize")
+    rev = client.post(f"/api/v1/ledger/logs/{created.json()['id']}/reverse")
+    assert rev.status_code == 201
+    assert client.get(f"/api/v1/bioprocess/{rev.json()['id']}").status_code == 404
+
+
+def test_bioprocess_summary_aggregates_per_crop(client):
+    _post_drying(client, crop="maize", extra=_drying_extra())
+    _post_drying(client, crop="maize", extra=_drying_extra(mass_in_kg=200.0, mass_out_kg=168.0))
+
+    resp = client.get("/api/v1/bioprocess/summary")
+    assert resp.status_code == 200
+    crops = {c["crop"]: c for c in resp.json()["crops"]}
+    assert set(crops) == {"maize"}
+    maize = crops["maize"]
+    assert maize["drying_runs"] == 2
+    assert maize["total_mass_in_kg"] == pytest.approx(300.0)
+    assert maize["total_marketable_mass_kg"] == pytest.approx(84.0 + 168.0)
+    assert maize["total_water_removed_kg"] == pytest.approx(16.0 + 32.0)
+    assert maize["safe_storage_share"] == pytest.approx(1.0)  # both final 13.0 <= 13.0
+    assert "SUN" in maize["mean_newton_k_by_method"]
+
+
+def test_bioprocess_summary_excludes_reversed_run(client):
+    # Fixture E: a reversed drying run drops out of the aggregate entirely (both
+    # the reversal contra and the reversed original are excluded).
+    maize = _post_drying(client, crop="maize")
+    _post_drying(client, crop="rice",
+                 extra=_drying_extra(moisture_initial_wb=22.0, moisture_final_wb=13.5, mass_out_kg=90.0))
+
+    rev = client.post(f"/api/v1/ledger/logs/{maize.json()['id']}/reverse")
+    assert rev.status_code == 201
+
+    crops = {c["crop"]: c for c in client.get("/api/v1/bioprocess/summary").json()["crops"]}
+    assert "maize" not in crops          # reversed -> excluded
+    assert crops["rice"]["drying_runs"] == 1
+    assert crops["rice"]["safe_storage_share"] == pytest.approx(1.0)  # 13.5 <= 14.0
+
+
+def test_bioprocess_summary_crop_filter(client):
+    _post_drying(client, crop="maize")
+    _post_drying(client, crop="rice",
+                 extra=_drying_extra(moisture_initial_wb=22.0, moisture_final_wb=13.5, mass_out_kg=90.0))
+
+    crops = {c["crop"] for c in client.get("/api/v1/bioprocess/summary?crop=maize").json()["crops"]}
+    assert crops == {"maize"}

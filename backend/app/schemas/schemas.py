@@ -243,3 +243,50 @@ class InvestorReport(BaseModel):
     generated_at: datetime
     pnl: PnlReport
     crops: List[DSSCropMetrics]
+
+
+# --- Bioprocess read / aggregate responses (ticket 08, Phase 4) ---
+# Every field here is derived on read from the stored DryingParams payload by
+# bioprocess_service; nothing below is persisted.
+class DryingMetrics(BaseModel):
+    dry_matter_kg: float
+    mass_out_expected_kg: float
+    process_loss_kg: float
+    process_loss_pct: float
+    process_loss_warning: bool
+    water_removed_kg: float
+    drying_rate_kg_h: float
+    specific_drying_rate: float
+    moisture_initial_db: float
+    moisture_final_db: float
+    moisture_ratio_final: float
+    newton_k: float
+    # Page fit ({n, k, r2_linear, n_used, n_dropped}) or null below 3 usable
+    # readings. Dict[str, Any] keeps the integer counts from being coerced.
+    page: Optional[Dict[str, Any]] = None
+    safe_storage: Optional[bool] = None
+    safe_storage_threshold_wb: Optional[float] = None
+
+
+class BioprocessDetail(BaseModel):
+    id: int
+    crop: Optional[str] = None
+    params: DryingParams
+    metrics: DryingMetrics
+
+
+class BioprocessCropSummary(BaseModel):
+    crop: str
+    drying_runs: int
+    total_mass_in_kg: float
+    total_marketable_mass_kg: float
+    total_water_removed_kg: float
+    mean_drying_rate_kg_h: float
+    mean_newton_k_by_method: Dict[str, float]
+    # Fraction of this crop's runs at or below the safe-storage threshold; null
+    # when the crop is outside the storage table (unknown, never assumed unsafe).
+    safe_storage_share: Optional[float] = None
+
+
+class BioprocessSummary(BaseModel):
+    crops: List[BioprocessCropSummary]
