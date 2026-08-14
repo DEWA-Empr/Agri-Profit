@@ -14,4 +14,5 @@ pandas
 numpy
 joblib
 pytest
+pytest-cov
 httpx
