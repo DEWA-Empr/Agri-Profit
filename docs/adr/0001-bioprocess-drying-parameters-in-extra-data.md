@@ -68,6 +68,18 @@ No new database table and no Alembic migration are introduced.
   ratio is `M_db(t) / M_db(0)`. This simplification is stated in the fitter's
   docstring and in LIMITATIONS.
 
+## Known boundary — marketable unit cost
+
+`unit_cost_per_kg_marketable` assumes a crop's recorded drying runs cover its
+**whole** harvest. It divides a crop's *total* expenses by the marketable mass
+of its dried lots, so where only part of a harvest is dried the figure
+**overstates** unit cost: the numerator is total crop expense while the
+denominator is the dried portion only. The demo is deliberately coherent on this
+point — the entire 100 kg harvest passes through one drying run to 84 kg
+marketable, so both unit costs are per-kilogram and differ only by the mass
+drying removed. Attributing expense proportionally to the dried fraction is
+future work; until then the metric is sound only when drying covers the harvest.
+
 ## Demonstration
 
 A seeded demo drying run lets the feature be shown live without typing during
