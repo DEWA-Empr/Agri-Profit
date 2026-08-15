@@ -14,8 +14,10 @@ import os
 import urllib.error
 import urllib.request
 
+# NB: the address must pass EmailStr — a reserved TLD like `.local` is rejected
+# (RFC 6762 special-use). Use `.example`, as the test suite does.
 BASE = os.environ.get("API_BASE", "http://localhost:8000") + "/api/v1"
-EMAIL = "demo-bioprocess@agriprofit.local"
+EMAIL = "demo-bioprocess@test.example"
 PASSWORD = "demo-bioprocess-pw"
 
 
