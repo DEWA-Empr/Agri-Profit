@@ -194,7 +194,15 @@ class DSSCropMetrics(BaseModel):
     yield_quantity: float
     yield_unit: Optional[str] = None
     # None when the crop has no recorded yield quantity (no division by zero).
+    # Denominator is the crop's harvest unit (e.g. bags) — unchanged by ticket 08.
     unit_cost_of_production: Optional[float] = None
+    # ADDITIVE (ticket 08): Marketable Mass (kg) across the crop's non-reversed
+    # drying runs, and a second unit cost denominated per kg of that marketable
+    # mass. Both None when the crop has no non-reversed drying runs; the per-kg
+    # cost is also None when marketable mass is 0 (no division by zero). These do
+    # NOT change unit_cost_of_production — they sit beside it, each with one unit.
+    marketable_mass_kg: Optional[float] = None
+    unit_cost_per_kg_marketable: Optional[float] = None
 
 class DSSOverall(BaseModel):
     revenue: float

@@ -962,3 +962,84 @@ def test_bioprocess_summary_crop_filter(client):
 
     crops = {c["crop"] for c in client.get("/api/v1/bioprocess/summary?crop=maize").json()["crops"]}
     assert crops == {"maize"}
+
+
+# --- DSS coupling: reversal netting + marketable-mass metric (ticket 08, Phase 5)
+
+def _dss_crops(client) -> dict:
+    return {c["crop"]: c for c in client.get("/api/v1/dss/decision-support").json()["crops"]}
+
+
+def test_dss_reversed_crop_expense_no_unspecified_bucket(client):
+    # (a) Reversing a crop expense nets within that crop — no phantom
+    # "Unspecified" bucket, and the crop's expenses return to zero.
+    exp = _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit")
+    assert _dss_crops(client)["maize"]["expenses"] == 25000.0
+
+    rev = client.post(f"/api/v1/ledger/logs/{exp.json()['id']}/reverse")
+    assert rev.status_code == 201
+
+    after = _dss_crops(client)
+    assert "Unspecified" not in after
+    assert after["maize"]["expenses"] == 0.0
+
+
+def test_dss_reversed_yield_restores_quantity_and_unit_cost(client):
+    # (b) Reversing a yield removes its quantity from the denominator, so
+    # unit_cost is recomputed (here back to None) rather than silently shifting.
+    _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit")
+    y = _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags")
+
+    before = _dss_crops(client)["maize"]
+    assert before["yield_quantity"] == 12.0
+    assert before["unit_cost_of_production"] == pytest.approx(25000.0 / 12.0)
+
+    assert client.post(f"/api/v1/ledger/logs/{y.json()['id']}/reverse").status_code == 201
+
+    after = _dss_crops(client)["maize"]
+    assert after["yield_quantity"] == 0.0                 # quantity left the denominator
+    assert after["unit_cost_of_production"] is None       # no yield -> no divide
+    assert after["revenue"] == 0.0                        # credit reversed
+    assert after["expenses"] == 25000.0                   # expenses untouched
+
+
+def test_dss_crop_with_drying_reports_both_unit_costs(client):
+    # (c) A crop with drying runs reports BOTH unit costs, each with one unit,
+    # and their values differ so the two denominators can never be merged.
+    _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="maize", amount=40000.0, transaction_type="credit", quantity=12.0, unit="bags")
+    _post_drying(client, crop="maize", amount=3500.0, extra=_drying_extra())  # mass_out 84.0
+
+    m = _dss_crops(client)["maize"]
+    assert m["expenses"] == pytest.approx(28500.0)  # includes the 3500 drying cost
+    assert m["yield_quantity"] == 12.0
+    # Unchanged metric: currency per harvest unit (bags).
+    assert m["unit_cost_of_production"] == pytest.approx(28500.0 / 12.0)
+    # New metric: currency per kg marketable (84 kg).
+    assert m["marketable_mass_kg"] == pytest.approx(84.0)
+    assert m["unit_cost_per_kg_marketable"] == pytest.approx(28500.0 / 84.0)
+    assert m["unit_cost_of_production"] != pytest.approx(m["unit_cost_per_kg_marketable"])
+
+
+def test_dss_crop_without_drying_runs_unchanged(client):
+    # (d) A crop with no drying runs: both new fields null, unit_cost unchanged.
+    _post_crop_log(client, activity_type="fertilizer", crop="sorghum", amount=5000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="sorghum", amount=8000.0, transaction_type="credit", quantity=4.0, unit="bags")
+
+    m = _dss_crops(client)["sorghum"]
+    assert m["unit_cost_of_production"] == pytest.approx(5000.0 / 4.0)
+    assert m["marketable_mass_kg"] is None
+    assert m["unit_cost_per_kg_marketable"] is None
+
+
+def test_dss_reversed_only_drying_run_no_division_error(client):
+    # (e) Reversing the only drying run leaves marketable mass empty and the
+    # per-kg cost null — a guarded division, not 0 or infinity.
+    d = _post_drying(client, crop="maize", amount=3500.0, extra=_drying_extra())
+    assert _dss_crops(client)["maize"]["marketable_mass_kg"] == pytest.approx(84.0)
+
+    assert client.post(f"/api/v1/ledger/logs/{d.json()['id']}/reverse").status_code == 201
+
+    after = _dss_crops(client)["maize"]
+    assert after["marketable_mass_kg"] in (None, 0.0)
+    assert after["unit_cost_per_kg_marketable"] is None
