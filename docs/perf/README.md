@@ -48,6 +48,8 @@ not applied packet-level throttling:
 - `flow-iter1..3.json` — 3 Lighthouse user-flow results, each containing **both**
   a cold and a warm navigation
 - `flow.mjs` — the user-flow script that produced them
+- `offline-probe.mjs` — the driven-browser probe that settled service-worker
+  attribution (see below); exits 0 on PASS
 
 **Discarded as invalid, and deliberately not committed:** the
 `lh-slow3g-warm-*` CLI runs (3) and the 1600 Kbps runs labelled "3G"
@@ -121,6 +123,42 @@ the second navigation the main bundle is served from cache — `transferSize` 0,
 against 243,534 bytes on the cold load — and the request count drops from 7
 to 6.
 
+## Service-worker attribution
+
+Cache attribution IS established. A driven-browser probe (see
+`offline-probe.mjs`) confirmed the page is controlled by `/sw.js`, that the sole
+cache is `workbox-precache-v2` containing five entries including the application
+bundle, and that a full navigation performed with the network disconnected
+returned HTTP 200 with `response.fromServiceWorker() === true` and rendered the
+login screen. Control requests to non-precached URLs were rejected with
+`ERR_INTERNET_DISCONNECTED` both before and after that navigation, confirming
+the network was genuinely unreachable.
+
+Note: `navigator.onLine` reports `true` after an emulated-offline navigation and
+must be disregarded; the control fetches are the evidence.
+
+Known gap: `pwa-192x192.png` is not precached and is unavailable offline.
+
+The five precached entries:
+
+| Entry | Bytes (uncompressed) |
+|---|---|
+| `index.html` | 581 |
+| `assets/index-C1SNwsT_.js` | 807,372 |
+| `assets/index-CMvIr7Qx.css` | 1,669 |
+| `manifest.webmanifest` | 380 |
+| `registerSW.js` | 134 |
+
+Neither `pwa-192x192.png` nor `favicon.svg` appears in that list — the icon gap
+is a deterministic fact about the precache manifest, corroborated by an observed
+`ERR_INTERNET_DISCONNECTED` when Chrome fetched the manifest icon offline.
+(Whether that fetch is attempted at all varies between runs, so the precache
+listing, not the failed request, is the evidence of record.)
+
+The bundle is 807,372 bytes in cache against 243,534 bytes transferred on the
+cold load — the former is uncompressed, the latter gzip over the wire. Both
+figures describe the same asset.
+
 ## Reading caveats
 
 - **SI equals FCP in most runs.** The app shell has no images above the fold and
@@ -132,12 +170,9 @@ to 6.
   is included in the tables for completeness because it was asked for, and
   because it is still the clearest single number for "when did the main thread
   settle" — but it should not be presented as a Lighthouse-scored metric.
-- **Cache attribution is not established.** The warm navigation demonstrably
-  re-used the precached shell (0-byte transfer of a 243 KB bundle), but
-  Lighthouse did not mark those requests `fromServiceWorker`, so these runs do
-  not by themselves distinguish the service-worker cache from Chrome's HTTP
-  disk cache. The claim these artifacts support is "the second load is served
-  from cache", not "served specifically by the service worker".
+- **Cache attribution is established** — but not by these Lighthouse artifacts
+  alone, which never mark the warm requests `fromServiceWorker`. It is settled
+  by `offline-probe.mjs`; see "Service-worker attribution" below.
 - **CLS is 0.000 everywhere**, which is expected for a fixed-layout shell but is
   also a weak signal at this page count — it is not evidence of layout stability
   across the whole application.
@@ -173,6 +208,12 @@ Warm (cache) measurement — the CLI cannot do this; use the flow script:
 node docs/perf/flow.mjs
 ```
 
-`flow.mjs` hard-codes absolute paths to the globally installed Lighthouse, to
-Chrome, and to its own output directory; adjust those three constants before
-re-running on another machine.
+Service-worker attribution:
+
+```bash
+node docs/perf/offline-probe.mjs   # exits 0 on PASS, 1 on FAIL
+```
+
+`flow.mjs` and `offline-probe.mjs` hard-code absolute paths to the globally
+installed Lighthouse, to Chrome, and (for `flow.mjs`) to an output directory;
+adjust those constants before re-running on another machine.
