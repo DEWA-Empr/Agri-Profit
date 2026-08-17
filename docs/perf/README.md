@@ -19,7 +19,7 @@ that produced it, and so the measurement can be repeated.
 | | |
 |---|---|
 | **Tool** | Lighthouse **13.4.1** (npm global), driven by headless Chrome |
-| **Date of runs** | **2026-08-17**, 17:41–17:47 UTC (all artifacts, per each report's `fetchTime`) |
+| **Date of runs** | **2026-08-17**, 17:41–17:47 UTC (all artifacts, per each report's `fetchTime`). The measuring machine's local clock read 02:41–02:47 on the 18th; **UTC is the convention used throughout the write-up**, so these runs are "17 August" everywhere and should not be redated to the 18th. |
 | **Target** | `http://localhost:4173/` — the `frontend-prod` compose service (`vite preview` on the production build, so the PWA service worker is active) |
 | **Backend** | `agrip-backend-1` + `agrip-db-1` from `docker-compose.yml`, running locally |
 | **Form factor** | Mobile emulation — 412 × 823 @ DPR 1.75, Moto G Power UA |

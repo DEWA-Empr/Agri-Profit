@@ -2,7 +2,7 @@
 
 Evaluation strand for Section 3.8.2. Lighthouse audit of the production
 build under mobile emulation and simulated network throttling, with
-service-worker attribution established by driven browser. Measured 18
+service-worker attribution established by driven browser. Measured 17
 August 2026 against build index-AjooZYSG.js; supersedes the 15 August
 set, retained at docs/perf/2026-08-15/.
 
@@ -30,7 +30,7 @@ Two measurement attempts were made, found invalid, and discarded. Both
 are documented in Section 6 rather than omitted.
 
 A fourth statement is required by honesty rather than by the data: the
-functional changes made on 18 August did not improve performance. Every
+functional changes made on 17 August did not improve performance. Every
 difference against the 15 August set lies inside run-to-run variance,
 and the bundle grew by 190 bytes. The correct claim is that performance
 is unchanged, and Section 7 explains why the apparent improvement in two
@@ -206,7 +206,7 @@ effect.
 **A confound must be declared before any figure here is compared with
 the superseded 15 August set. Lighthouse records a host benchmark index
 with every run: it ranged from 609.5 to 935 in August and from 425 to
-1561.5 on 18 August, meaning the measuring machine was roughly
+1561.5 on 17 August, meaning the measuring machine was roughly
 one-and-a-half to two times faster and considerably less stable. First
 Contentful Paint, Largest Contentful Paint and Speed Index are modelled
 analytically under simulated throttling and are largely insulated from
@@ -304,7 +304,7 @@ extend the precache glob to include it.
     session and were out of scope. The warm figures describe the shell
     loading, not the whole application becoming usable with data.
 
--   Figures characterise build index-AjooZYSG.js as at 18 August 2026
+-   Figures characterise build index-AjooZYSG.js as at 17 August 2026
     and would need repeating after any change to the bundle. The
     superseded 15 August set is retained unmodified at
     docs/perf/2026-08-15/.
