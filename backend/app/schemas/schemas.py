@@ -186,15 +186,29 @@ class DSSPredictResponse(BaseModel):
 # --- DSS (Tier 1: deterministic decision support) Schemas ---
 # Metrics derived directly from the farm's real ledger (no model, no synthetic
 # inputs). See services/dss_service.py and Chapter 3 §3.6.5.
+class YieldByUnit(BaseModel):
+    """One unit's worth of a crop's recorded yield. `unit` is None for rows
+    saved without a unit (historical free-text entry allowed it)."""
+    unit: Optional[str] = None
+    quantity: float
+
+
 class DSSCropMetrics(BaseModel):
     crop: str
     revenue: float
     expenses: float
     gross_margin: float
-    yield_quantity: float
+    # The crop's total yield — but ONLY when a single unit is in play. 0.0 when
+    # nothing is recorded, and **None when the crop's yields span two or more
+    # units**, because no honest single total exists in that case. Quantities in
+    # different units are never summed together; yield_by_unit always carries
+    # the real per-unit figures.
+    yield_quantity: Optional[float] = None
     yield_unit: Optional[str] = None
-    # None when the crop has no recorded yield quantity (no division by zero).
-    # Denominator is the crop's harvest unit (e.g. bags) — unchanged by ticket 08.
+    yield_by_unit: List[YieldByUnit] = []
+    # None when the crop has no recorded yield quantity (no division by zero),
+    # and also None when the yield spans mixed units — a unit cost needs a
+    # single denominator. Denominator is the crop's harvest unit (e.g. bags).
     unit_cost_of_production: Optional[float] = None
     # ADDITIVE (ticket 08): Marketable Mass (kg) across the crop's non-reversed
     # drying runs, and a second unit cost denominated per kg of that marketable

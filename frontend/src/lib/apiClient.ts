@@ -64,11 +64,21 @@ export interface AuthToken {
   token_type: string;
 }
 
+// Mirrors backend schemas.UserOut. The farm's *name* is deliberately absent —
+// UserOut does not expose it, so the UI shows the email (which it does expose)
+// rather than inventing a display name.
+export interface CurrentUser {
+  id: number;
+  email: string;
+  farm_id: number;
+}
+
 export const authService = {
   register: (data: { email: string; password: string; farm_name?: string }) =>
     api.post<AuthToken>('/auth/register', data),
   login: (data: { email: string; password: string }) =>
     api.post<AuthToken>('/auth/login', data),
+  me: () => api.get<CurrentUser>('/auth/me'),
 };
 
 // Request/response payloads are typed against types/domain.ts — the shared
@@ -78,6 +88,10 @@ export const ledgerService = {
   createLog: (data: OperationalLogCreate) => api.post<OperationalLog>('/ledger/logs', data),
   getSummary: () => api.get<Summary>('/ledger/summary'),
   getTransactions: () => api.get<FinancialTransaction[]>('/ledger/transactions'),
+  // Post an offsetting entry for a mistaken log. Ledger records are immutable —
+  // this is the only correction mechanism. 409 if the target is itself a
+  // reversal or has already been reversed; 404 if it isn't this farm's.
+  reverseLog: (id: number) => api.post<OperationalLog>(`/ledger/logs/${id}/reverse`),
 };
 
 export const equipmentService = {

@@ -12,7 +12,9 @@ import { colors } from '../../styles/theme';
 // dashboard carries the global Export / Add Record actions; the other pages
 // provide their own primary action (e.g. "Log activity", "Add Equipment").
 const pageMeta: Record<string, { title: string; subtitle: string }> = {
-  '/': { title: 'Season Overview', subtitle: 'Profit, fields and decisions • Currency in NGN (₦)' },
+  // "Farm Overview", not "Season Overview": there is no season entity in the
+  // model, so the figures below are all-time, not per-season.
+  '/': { title: 'Farm Overview', subtitle: 'Profit, costs and decisions • Currency in NGN (₦)' },
   '/records': { title: 'Farm Records', subtitle: 'All logged operational activities and their financial impact.' },
   '/reports': { title: 'P&L Report', subtitle: 'Profit & loss by activity category, from the financial ledger.' },
   '/equipment': { title: 'Equipment', subtitle: 'Machinery, acquisition cost, depreciation and maintenance.' },

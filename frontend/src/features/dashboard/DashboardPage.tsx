@@ -5,7 +5,6 @@ import type { Summary } from '../../types/domain';
 import { MetricCard } from './components/MetricCard';
 import { PnlChart } from './components/PnlChart';
 import { CostBreakdown } from './components/CostBreakdown';
-import { FieldPerformance } from './components/FieldPerformance';
 import { DecisionSupport } from './components/DecisionSupport';
 import { DashboardOnboarding } from './components/DashboardOnboarding';
 
@@ -43,13 +42,14 @@ const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* KPI ROW — first four are real (from /ledger/summary); avg yield is illustrative. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '11px' }}>
-        <MetricCard label="Net Profit" value={fmt(summary.gross_margin)} delta="↑ 12.4% YoY" deltaTone={summary.gross_margin >= 0 ? 'up' : 'down'} spark={[8, 11, 10, 14, 17, 22]} highlight />
-        <MetricCard label="Gross Revenue" value={fmt(summary.revenue)} delta="↑ 8.1% YoY" deltaTone="up" spark={[30, 34, 33, 40, 44, 48]} />
-        <MetricCard label="Operating Cost" value={fmt(summary.expenses)} delta="↑ 5.6% YoY" deltaTone="down" spark={[18, 20, 19, 24, 26, 28]} />
-        <MetricCard label="Profit Margin" value={`${marginPct.toFixed(1)}%`} delta="↑ 2.0 pts" deltaTone="up" spark={[38, 40, 39, 41, 42, 43]} />
-        <MetricCard label="Avg Yield" value="168 bu/ac" delta="↑ 4.3% YoY" deltaTone="up" spark={[150, 156, 154, 160, 164, 168]} />
+      {/* KPI ROW — every tile is a figure from /ledger/summary. No YoY deltas or
+          sparklines: there is no prior-year data and no per-tile history source,
+          so any trend shown here would be invented. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '11px' }}>
+        <MetricCard label="Net Profit" value={fmt(summary.gross_margin)} highlight />
+        <MetricCard label="Gross Revenue" value={fmt(summary.revenue)} />
+        <MetricCard label="Operating Cost" value={fmt(summary.expenses)} />
+        <MetricCard label="Profit Margin" value={`${marginPct.toFixed(1)}%`} />
       </div>
 
       {/* TREND + COST */}
@@ -58,11 +58,9 @@ const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
         <CostBreakdown />
       </div>
 
-      {/* FIELDS + DECISIONS */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '18px', alignItems: 'start' }}>
-        <FieldPerformance />
-        <DecisionSupport />
-      </div>
+      {/* DECISIONS — per-crop metrics from the real ledger. (The former "Field
+          performance" table was removed: the model has no field entity.) */}
+      <DecisionSupport />
     </div>
   );
 };

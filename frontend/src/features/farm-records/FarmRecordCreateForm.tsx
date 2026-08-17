@@ -4,13 +4,20 @@ import type { Category, TransactionType, OperationalLogCreate } from '../../type
 import { saveOperationalLog } from '../../lib/logs';
 import { colors } from '../../styles/theme';
 
+// NOTE: "Bioprocess" is deliberately absent. The backend requires a valid
+// DryingParams payload on any bioprocess log (schemas.OperationalLogCreate
+// ._validate_bioprocess_payload) and this form has no way to collect one, so
+// choosing it produced a guaranteed 422. That is worse than a plain error:
+// saveOperationalLog treats the failure as a network problem and queues the
+// record in IndexedDB, where it re-fails on every flush, exhausts its retries
+// and sits there permanently — with a Retry button that can never succeed.
+// Re-add this option only together with the drying-parameter fields.
 const CATEGORIES: { value: Category; label: string }[] = [
   { value: 'yield', label: 'Crop yield / sale' },
   { value: 'seed', label: 'Seed' },
   { value: 'fertilizer', label: 'Fertilizer' },
   { value: 'labour', label: 'Labour' },
   { value: 'mechanization', label: 'Mechanization' },
-  { value: 'bioprocess', label: 'Bioprocess' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -18,6 +25,13 @@ const CATEGORIES: { value: Category; label: string }[] = [
 // record's crop drives the per-crop unit-cost / gross-margin panel; leaving it
 // blank files the record under "Unspecified" there.
 const CROPS = ['maize', 'rice', 'sorghum', 'soybean', 'cassava'];
+
+// Harvest units, fixed rather than free text. Yield totals are grouped by unit
+// on the backend, and free text meant "kg", "Kg" and "kilos" became three
+// different units for the same thing — with the per-crop total silently
+// unavailable as a result. Existing records keep whatever text they were saved
+// with; only new entries are constrained.
+const UNITS = ['kg', 'tonnes', 'bags', 'crates'];
 
 // Sales/income default to a credit; everything else is a cost (debit).
 const defaultTxType = (c: Category): TransactionType => (c === 'yield' ? 'credit' : 'debit');
@@ -128,7 +142,10 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
         </div>
         <div>
           <label style={label}>Unit</label>
-          <input type="text" placeholder="bags, kg, ha…" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} style={field} />
+          <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} style={field}>
+            <option value="">—</option>
+            {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
         </div>
         <div>
           <label style={label}>Amount (₦)</label>

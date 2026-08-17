@@ -20,10 +20,24 @@ const naira = (n: number): string => {
   return `${n < 0 ? '−' : ''}₦${body}`;
 };
 
+// What to say about unit cost, given the three states the backend distinguishes:
+// a real figure, no yield at all, or yields spanning more than one unit.
+const unitCostLine = (c: DssCropMetrics, cost?: number | null): string => {
+  if (cost != null && c.yield_quantity != null && c.yield_quantity > 0) {
+    return `Unit cost of production ${naira(cost)}/${c.yield_unit ?? 'unit'}`;
+  }
+  if ((c.yield_by_unit?.length ?? 0) > 1) {
+    return 'Unit cost — needs one harvest unit';
+  }
+  return 'Unit cost — no yield recorded yet';
+};
+
 const CropRow = ({ c }: { c: DssCropMetrics }) => {
   // A profitable crop reads as an opportunity; a loss-making one as an alert.
   const a = c.gross_margin >= 0 ? accents.insight : accents.alert;
   const cost = c.unit_cost_of_production;
+  const byUnit = c.yield_by_unit ?? [];
+  const mixedUnits = byUnit.length > 1;
   return (
     <div style={{ background: a.bg, borderLeft: `3px solid ${a.bar}`, borderRadius: '7px', padding: '11px 13px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }}>
@@ -36,9 +50,17 @@ const CropRow = ({ c }: { c: DssCropMetrics }) => {
       <p style={{ fontSize: '11px', color: colors.textMuted, marginTop: '6px', lineHeight: 1.5 }}>
         Revenue {naira(c.revenue)} · Cost {naira(c.expenses)}
         <br />
-        {cost != null && c.yield_quantity > 0
-          ? `Unit cost of production ${naira(cost)}/${c.yield_unit ?? 'unit'}`
-          : 'Unit cost — no yield recorded yet'}
+        {unitCostLine(c, cost)}
+        {/* With more than one harvest unit there is no single total to divide
+            by, so we show the breakdown instead of a made-up figure. */}
+        {mixedUnits && (
+          <>
+            <br />
+            <span style={{ color: colors.warn }}>
+              Yield recorded in {byUnit.map((y) => `${y.quantity.toLocaleString()} ${y.unit ?? 'no unit'}`).join(' + ')} — mixed units, so no single total
+            </span>
+          </>
+        )}
       </p>
     </div>
   );

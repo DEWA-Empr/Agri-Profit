@@ -35,6 +35,14 @@ export interface OperationalLog {
   unit?: string | null;
   crop?: string | null;
   timestamp: string;
+  // Set when this log is a reversing (contra) entry: the id of the log it
+  // offsets. The API has always returned this (backend schemas.OperationalLog);
+  // it was simply missing from this mirror.
+  //
+  // Note the asymmetry: a log can say what it reverses, but NOT whether it has
+  // itself been reversed — there is no `reversed_by` field. That state is
+  // derived on the client by collecting every non-null reverses_id in the list.
+  reverses_id?: number | null;
   financial_transaction_id?: number | null;
   financial_transaction?: FinancialTransaction | null;
 }
@@ -87,14 +95,27 @@ export interface MonthlyPnlPoint {
 
 // --- DSS Tier 1: deterministic decision support (GET /dss/decision-support) ---
 // Per-crop metrics computed from the real ledger — no model, no synthetic data.
+// One unit's worth of a crop's recorded yield. `unit` is null for older rows
+// saved before the unit field was constrained to a fixed list.
+export interface YieldByUnit {
+  unit?: string | null;
+  quantity: number;
+}
+
 export interface DssCropMetrics {
   crop: string;
   revenue: number;
   expenses: number;
   gross_margin: number;
-  yield_quantity: number;
+  // A single total ONLY when one unit is in play; 0 when nothing is recorded;
+  // **null when the crop's yields span two or more units**, because no honest
+  // single total exists then. Never a sum across different units.
+  yield_quantity?: number | null;
   yield_unit?: string | null;
-  // null when the crop has no recorded yield (no fabricated unit cost).
+  // Always the authoritative per-unit breakdown.
+  yield_by_unit?: YieldByUnit[];
+  // null when the crop has no recorded yield, and when units are mixed (a unit
+  // cost needs a single denominator).
   unit_cost_of_production?: number | null;
 }
 

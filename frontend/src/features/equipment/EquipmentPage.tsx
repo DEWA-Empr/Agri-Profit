@@ -91,7 +91,10 @@ const EquipmentPage = () => {
                   <Calendar size={13} /> ₦{item.purchase_price?.toLocaleString() ?? '—'}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#666' }}>
-                  <Hash size={13} /> {item.depreciation_rate ?? '—'}% Dep.
+                  {/* "Dep. rate", not "Dep.": this is the rate as entered, not
+                      a depreciation figure. Nothing in the system computes
+                      accumulated depreciation or a book value. */}
+                  <Hash size={13} /> Dep. rate {item.depreciation_rate ?? '—'}%/yr
                 </div>
               </div>
               <button

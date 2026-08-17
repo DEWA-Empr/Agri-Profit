@@ -82,7 +82,10 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
 
         b = buckets.setdefault(
             crop,
-            {"revenue": 0.0, "expenses": 0.0, "yield_quantity": 0.0, "yield_unit": None},
+            # yield_by_unit maps a NORMALISED unit key -> {"unit": <as first
+            # written>, "quantity": <total>}. Quantities are only ever summed
+            # within one key, never across keys (see below).
+            {"revenue": 0.0, "expenses": 0.0, "yield_by_unit": {}},
         )
         amount = sign * float(tx.amount or 0.0)
         if tx.transaction_type == TransactionType.CREDIT:
@@ -98,9 +101,21 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
             and log.quantity
             and log.id not in reversed_ids
         ):
-            b["yield_quantity"] += float(log.quantity)
-            if b["yield_unit"] is None and log.unit:
-                b["yield_unit"] = log.unit
+            # Group BY unit. Previously this summed every quantity into one
+            # running total and labelled it with whichever unit happened to
+            # arrive first, so 100 kg + 12 bags reported "112 kg" — a number
+            # that was never true, on the figure a lender reads.
+            #
+            # Units are free text on historical rows, so the key is normalised
+            # (trimmed + lower-cased) to collapse "kg"/"Kg"/" KG " into one
+            # bucket; the first spelling seen is kept for display. A row with no
+            # unit at all keys under None and stays its own bucket — unknown is
+            # not the same as compatible.
+            key = (log.unit or "").strip().lower() or None
+            slot = b["yield_by_unit"].setdefault(
+                key, {"unit": (log.unit or "").strip() or None, "quantity": 0.0}
+            )
+            slot["quantity"] += float(log.quantity)
 
         # Marketable Mass: outlet mass of non-reversed drying runs, by crop.
         if (
@@ -116,8 +131,32 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
     crops = []
     for crop in sorted(buckets):
         b = buckets[crop]
-        yq = b["yield_quantity"]
-        unit_cost = (b["expenses"] / yq) if yq > 0 else None
+
+        # Stable, presentable breakdown: unit-less bucket last, others by unit.
+        by_unit = sorted(
+            (
+                {"unit": slot["unit"], "quantity": slot["quantity"]}
+                for slot in b["yield_by_unit"].values()
+                if slot["quantity"] > 0
+            ),
+            key=lambda s: (s["unit"] is None, s["unit"] or ""),
+        )
+
+        # A single total is only meaningful when ONE unit is in play. With two
+        # or more, the quantity and the unit cost are reported as unavailable
+        # (None) rather than invented — the breakdown carries the real figures.
+        if len(by_unit) == 1:
+            yq = by_unit[0]["quantity"]
+            y_unit = by_unit[0]["unit"]
+        elif not by_unit:
+            yq = 0.0            # no yield recorded: a genuine zero, not ambiguity
+            y_unit = None
+        else:
+            yq = None           # mixed units: no honest single total exists
+            y_unit = None
+
+        # Denominator must be a single unit; ambiguous -> no unit cost.
+        unit_cost = (b["expenses"] / yq) if (yq is not None and yq > 0) else None
         mm = marketable.get(crop)  # None when the crop has no non-reversed runs
         # Guard the division: None/0 marketable mass -> None, never 0 or infinity.
         unit_cost_kg = (b["expenses"] / mm) if (mm and mm > 0) else None
@@ -127,7 +166,8 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
             "expenses": b["expenses"],
             "gross_margin": b["revenue"] - b["expenses"],
             "yield_quantity": yq,
-            "yield_unit": b["yield_unit"],
+            "yield_unit": y_unit,
+            "yield_by_unit": by_unit,
             "unit_cost_of_production": unit_cost,
             "marketable_mass_kg": mm,
             "unit_cost_per_kg_marketable": unit_cost_kg,

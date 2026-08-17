@@ -1,13 +1,26 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { TrendingUp, TrendingDown, Wallet, ShieldCheck, Sprout } from 'lucide-react';
 import { shareService } from '../../lib/apiClient';
-import type { InvestorReport } from '../../types/domain';
+import type { InvestorReport, DssCropMetrics } from '../../types/domain';
 import { colors } from '../../styles/theme';
 
 // The page an investor/lender opens from a shared link — public, read-only, no
 // login. The token in the URL is the only credential; a revoked or invalid
 // token comes back as 404 and we show a neutral "link no longer active" notice.
 const naira = (n: number) => `₦${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Yield as reported to a lender. Quantities in different units are listed
+// separately, one per line — they are never added together, because a total
+// across kg and bags is not a quantity anyone can verify.
+const formatYield = (c: DssCropMetrics) => {
+  const byUnit = c.yield_by_unit ?? [];
+  if (byUnit.length === 0) return '—';
+  return byUnit.map((y) => (
+    <div key={y.unit ?? 'no-unit'}>
+      {y.quantity.toLocaleString()}{y.unit ? ` ${y.unit}` : ''}
+    </div>
+  ));
+};
 
 const PublicInvestorReport = ({ token }: { token: string }) => {
   const [report, setReport] = useState<InvestorReport | null>(null);
@@ -127,7 +140,10 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
                     {report.crops.map((c) => (
                       <tr key={c.crop}>
                         <td style={{ ...td, fontWeight: 600, textTransform: 'capitalize' }}>{c.crop}</td>
-                        <td style={tdRight}>{c.yield_quantity > 0 ? `${c.yield_quantity.toLocaleString()}${c.yield_unit ? ` ${c.yield_unit}` : ''}` : '—'}</td>
+                        {/* Each unit on its own line. This is the figure a
+                            lender reads, so mixed units are shown as the
+                            separate quantities they are, never added up. */}
+                        <td style={tdRight}>{formatYield(c)}</td>
                         <td style={tdRight}>{c.unit_cost_of_production != null ? naira(c.unit_cost_of_production) : '—'}</td>
                         <td style={{ ...tdRight, fontWeight: 600, color: c.gross_margin >= 0 ? colors.primaryDark : colors.danger }}>{naira(c.gross_margin)}</td>
                       </tr>
