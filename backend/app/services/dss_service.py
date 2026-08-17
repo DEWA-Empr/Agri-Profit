@@ -142,6 +142,40 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
             key=lambda s: (s["unit"] is None, s["unit"] or ""),
         )
 
+        # Drop empty buckets. A crop whose every record has been reversed nets
+        # to no money and no yield, and rendering it as a row of zeros implies
+        # activity that no longer stands. The commonest case is "Unspecified",
+        # which collects untagged records and so empties out completely once
+        # they are corrected.
+        #
+        # The test is deliberately NOT "gross margin is zero": a crop with
+        # revenue 25,000 and expenses 25,000 has a genuine zero margin and is a
+        # real result that must still be shown. Revenue and expenses are
+        # therefore checked SEPARATELY, and any recorded yield keeps the bucket
+        # alive on its own.
+        #
+        # Marketable mass keeps it alive too. Sun drying with the farm's own
+        # labour costs nothing, so a drying run is routinely recorded at 0.00
+        # (its paired transaction still exists — see
+        # test_bioprocess_create_zero_cost_still_pairs_transaction). Without
+        # this clause a crop whose only record is such a run would have no
+        # money and no harvest quantity, and would vanish along with the
+        # processing data it does have.
+        #
+        # Compared against a tolerance rather than exactly 0.0: reversal
+        # subtracts the same values that were added, but summing several
+        # amounts and then subtracting them individually can leave float
+        # residue (a + b - a - b is not always exactly 0). The tolerance is far
+        # below one kobo, so it can never mask a real transaction.
+        EMPTY = 1e-9
+        if (
+            abs(b["revenue"]) < EMPTY
+            and abs(b["expenses"]) < EMPTY
+            and not by_unit
+            and not marketable.get(crop)
+        ):
+            continue
+
         # A single total is only meaningful when ONE unit is in play. With two
         # or more, the quantity and the unit cost are reported as unavailable
         # (None) rather than invented — the breakdown carries the real figures.

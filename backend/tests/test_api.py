@@ -972,7 +972,9 @@ def _dss_crops(client) -> dict:
 
 def test_dss_reversed_crop_expense_no_unspecified_bucket(client):
     # (a) Reversing a crop expense nets within that crop — no phantom
-    # "Unspecified" bucket, and the crop's expenses return to zero.
+    # "Unspecified" bucket. The contra is attributed to the original's crop,
+    # which nets maize to nothing, so maize drops out as an empty bucket too
+    # (see test_dss_fully_reversed_crop_is_omitted).
     exp = _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=25000.0, transaction_type="debit")
     assert _dss_crops(client)["maize"]["expenses"] == 25000.0
 
@@ -981,7 +983,7 @@ def test_dss_reversed_crop_expense_no_unspecified_bucket(client):
 
     after = _dss_crops(client)
     assert "Unspecified" not in after
-    assert after["maize"]["expenses"] == 0.0
+    assert after == {}
 
 
 def test_dss_reversed_yield_restores_quantity_and_unit_cost(client):
@@ -1040,6 +1042,120 @@ def test_dss_reversed_only_drying_run_no_division_error(client):
 
     assert client.post(f"/api/v1/ledger/logs/{d.json()['id']}/reverse").status_code == 201
 
-    after = _dss_crops(client)["maize"]
-    assert after["marketable_mass_kg"] in (None, 0.0)
-    assert after["unit_cost_per_kg_marketable"] is None
+    # The run was maize's only record, so the bucket is now empty and omitted.
+    # The point of the test still holds: the guarded division is never reached
+    # with a zero denominator, and the response is assembled without error.
+    resp = client.get("/api/v1/dss/decision-support")
+    assert resp.status_code == 200
+    assert "maize" not in {c["crop"] for c in resp.json()["crops"]}
+
+
+# --- Empty-bucket filtering: a crop with nothing left in it is not a row -----
+
+def test_dss_fully_reversed_crop_is_omitted(client):
+    """A crop whose every record has been reversed disappears entirely.
+
+    It nets to no money and no yield, so rendering it as a row of zeros would
+    imply activity that no longer stands. This is the "Unspecified" case in the
+    field: untagged records collect there and empty it out once corrected.
+    """
+    exp = _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                         amount=25000.0, transaction_type="debit")
+    sale = _post_crop_log(client, activity_type="yield", crop="maize",
+                          amount=25000.0, transaction_type="credit",
+                          quantity=100.0, unit="kg")
+
+    before = _dss_crops(client)["maize"]
+    assert before["revenue"] == 25000.0
+    assert before["expenses"] == 25000.0
+    assert before["yield_quantity"] == 100.0
+
+    assert client.post(f"/api/v1/ledger/logs/{exp.json()['id']}/reverse").status_code == 201
+    assert client.post(f"/api/v1/ledger/logs/{sale.json()['id']}/reverse").status_code == 201
+
+    after = _dss_crops(client)
+    assert "maize" not in after
+    assert after == {}          # and it does not reappear under any other key
+
+
+def test_dss_zero_margin_crop_is_kept(client):
+    """Equal revenue and cost is a REAL result, not an empty bucket.
+
+    The filter tests revenue and expenses separately and never tests gross
+    margin, precisely so this crop survives: breaking even is a finding a
+    farmer needs to see, and it is arithmetically indistinguishable from a
+    fully-reversed crop if you only look at the margin.
+    """
+    _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                   amount=25000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="maize",
+                   amount=25000.0, transaction_type="credit",
+                   quantity=100.0, unit="kg")
+
+    crops = _dss_crops(client)
+    assert "maize" in crops
+    assert crops["maize"]["gross_margin"] == 0.0     # the zero that must survive
+    assert crops["maize"]["revenue"] == 25000.0
+    assert crops["maize"]["expenses"] == 25000.0
+
+
+def test_dss_zero_margin_crop_with_no_yield_is_kept(client):
+    """Zero margin with no yield recorded at all still survives.
+
+    Guards the filter against being loosened to "no yield means empty": the
+    money is real here even though nothing has been harvested yet.
+    """
+    _post_crop_log(client, activity_type="fertilizer", crop="rice",
+                   amount=10000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="other", crop="rice",
+                   amount=10000.0, transaction_type="credit")
+
+    crops = _dss_crops(client)
+    assert "rice" in crops
+    assert crops["rice"]["gross_margin"] == 0.0
+    assert crops["rice"]["yield_by_unit"] == []
+
+
+def test_dss_crop_kept_when_only_yield_remains(client):
+    """Yield alone keeps a bucket alive even when the money nets to zero.
+
+    A reversed sale leaves the harvest quantity standing (the contra carries no
+    quantity), and that recorded output is still a fact worth showing.
+    """
+    sale = _post_crop_log(client, activity_type="yield", crop="sorghum",
+                          amount=8000.0, transaction_type="credit",
+                          quantity=40.0, unit="bags")
+    _post_crop_log(client, activity_type="yield", crop="sorghum",
+                   amount=0.0, transaction_type="credit",
+                   quantity=15.0, unit="bags")
+
+    assert client.post(f"/api/v1/ledger/logs/{sale.json()['id']}/reverse").status_code == 201
+
+    crops = _dss_crops(client)
+    assert "sorghum" in crops                        # kept: yield remains
+    assert crops["sorghum"]["revenue"] == 0.0
+    assert crops["sorghum"]["yield_quantity"] == 15.0
+
+
+def test_dss_zero_cost_drying_run_survives_the_filter(client):
+    """A free sun-drying run is real processing data, not an empty bucket.
+
+    Sun drying with the farm's own labour is the normal case, and it is
+    recorded at 0.00 (the paired transaction still exists — see
+    test_bioprocess_create_zero_cost_still_pairs_transaction). Such a crop has
+    no revenue, no expenses and no harvest quantity, so the money-and-yield
+    test alone would delete it along with its marketable mass.
+    """
+    r = _post_drying(client, crop="cassava", amount=0.0)
+    assert r.status_code == 201, r.text
+
+    crops = _dss_crops(client)
+    assert "cassava" in crops                                   # kept by mass alone
+    c = crops["cassava"]
+    assert c["revenue"] == 0.0
+    assert c["expenses"] == 0.0
+    assert c["gross_margin"] == 0.0
+    assert c["yield_by_unit"] == []                             # nothing harvested here
+    assert c["marketable_mass_kg"] == pytest.approx(84.0)       # the reason it survives
+    # No cost to divide, so the per-kg cost is a guarded 0.0/None, never junk.
+    assert c["unit_cost_per_kg_marketable"] in (None, 0.0)
