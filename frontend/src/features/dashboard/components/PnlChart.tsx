@@ -43,8 +43,14 @@ export const PnlChart = () => {
         }
       />
 
-      <div style={{ height: '200px', width: '100%' }}>
-        <ResponsiveContainer width="100%" height="100%">
+      <div style={{ height: '200px', width: '100%', minWidth: 0 }}>
+        {/* initialDimension stops ResponsiveContainer rendering its first pass
+            at width/height -1, before its ResizeObserver has reported a size —
+            which is what produced the "width(-1) and height(-1)" console
+            warning on EVERY viewport, desktop included. The height matches the
+            wrapper exactly; the width is a placeholder replaced on the first
+            observed measurement. */}
+        <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 300, height: 200 }}>
           <AreaChart data={data} margin={{ top: 6, right: 6, bottom: 0, left: 6 }}>
             <defs>
               <linearGradient id="netFill" x1="0" y1="0" x2="0" y2="1">

@@ -98,3 +98,87 @@ button:active {
   }
   .card-interactive:hover { transform: none; }
 }
+
+/* --- Responsive layout -----------------------------------------------------
+   Single breakpoint at 768px (mirrored by MOBILE_QUERY in hooks/useMediaQuery).
+   Layout that is purely visual lives here rather than inline, so the collapse
+   is declarative and needs no resize listener. Only the sidebar's drawer
+   behaviour is driven from JS, because it needs open/close state.
+
+   These classes own their grid-template-columns outright — they are NOT
+   overriding an inline style — so no !important is needed. */
+
+/* KPI tile row: 4 across on desktop, stacked on mobile. */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 11px;
+}
+
+/* A wide-plus-narrow pair (chart + breakdown). */
+.split-row {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+/* A narrow-plus-wide pair (DSS inputs + result). */
+.split-row-reverse {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 18px;
+  align-items: start;
+}
+
+/* Evenly divided form/card grids, at their various column counts. */
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+
+/* Grid children default to min-width:auto, which lets wide content push a
+   column past its track and overflow the page. Forcing min-width:0 lets them
+   actually shrink — this is also what gives the chart card a real, positive
+   width for Recharts' ResponsiveContainer to measure, instead of the width(-1)
+   it reports when the container collapses. */
+.kpi-row > *,
+.split-row > *,
+.split-row-reverse > *,
+.grid-2 > *,
+.grid-3 > *,
+.grid-4 > * {
+  min-width: 0;
+}
+
+/* Wide content (tables) scrolls inside its own box so the PAGE never scrolls
+   sideways. -webkit-overflow-scrolling keeps momentum scrolling on iOS. */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 768px) {
+  .kpi-row,
+  .split-row,
+  .split-row-reverse,
+  .grid-2,
+  .grid-3,
+  .grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  /* Tables keep their columns legible and scroll horizontally rather than
+     compressing text to one word per line. */
+  .table-scroll > table {
+    min-width: 640px;
+  }
+}
+
+/* Nav drawer slides in from the left (the right-hand .drawer-panel above is
+   the equipment maintenance panel, which keeps its own direction). */
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+.nav-drawer { animation: slideInLeft 0.24s cubic-bezier(0.2, 0.8, 0.25, 1) both; }

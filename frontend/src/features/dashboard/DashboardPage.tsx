@@ -45,7 +45,7 @@ const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
       {/* KPI ROW — every tile is a figure from /ledger/summary. No YoY deltas or
           sparklines: there is no prior-year data and no per-tile history source,
           so any trend shown here would be invented. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '11px' }}>
+      <div className="kpi-row">
         <MetricCard label="Net Profit" value={fmt(summary.gross_margin)} highlight />
         <MetricCard label="Gross Revenue" value={fmt(summary.revenue)} />
         <MetricCard label="Operating Cost" value={fmt(summary.expenses)} />
@@ -53,7 +53,7 @@ const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
       </div>
 
       {/* TREND + COST */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '18px', alignItems: 'start' }}>
+      <div className="split-row">
         <PnlChart />
         <CostBreakdown />
       </div>

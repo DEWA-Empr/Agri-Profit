@@ -50,7 +50,7 @@ const EquipmentPage = () => {
       </div>
 
       {showAddForm && (
-        <form onSubmit={handleAddEquipment} className="fade-in-up" style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', alignItems: 'end' }}>
+        <form onSubmit={handleAddEquipment} className="fade-in-up grid-4" style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', alignItems: 'end' }}>
           <div>
             <label style={label}>Name</label>
             <input type="text" required value={newEq.name} onChange={(e) => setNewEq({ ...newEq, name: e.target.value })} style={input} />
@@ -75,7 +75,7 @@ const EquipmentPage = () => {
           <p style={{ fontSize: '12px', color: colors.textMuted, fontWeight: 500 }}>No equipment yet. Add your first machine.</p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+        <div className="grid-3" style={{ gap: '16px' }}>
           {equipment.map((item) => (
             <div key={item.id} className="card-interactive" style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

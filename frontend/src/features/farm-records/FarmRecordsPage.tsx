@@ -136,7 +136,7 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
         ) : logs.length === 0 ? (
           <p style={{ padding: '24px', fontSize: '12px', color: colors.textMuted }}>No records yet. Use “Log activity” to add your first record.</p>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={th}>Activity</th>
@@ -201,7 +201,7 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
       )}

@@ -12,7 +12,13 @@ import { colors } from '../../styles/theme';
 // Most nav badges are static (declared in navSections); the Farm Records badge
 // is live — it reflects the real record count so it can never contradict the
 // "no records yet" empty state. A null count (not yet loaded) or zero hides it.
-export const Sidebar: FC<{ isOnline: boolean; pendingCount: number; recordCount: number | null }> = ({ isOnline, pendingCount, recordCount }) => {
+export const Sidebar: FC<{
+  isOnline: boolean;
+  pendingCount: number;
+  recordCount: number | null;
+  /** Called when a nav link is activated, so the mobile drawer can close. */
+  onNavigate?: () => void;
+}> = ({ isOnline, pendingCount, recordCount, onNavigate }) => {
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -22,7 +28,7 @@ export const Sidebar: FC<{ isOnline: boolean; pendingCount: number; recordCount:
   }, []);
 
   return (
-  <aside style={{ width: '220px', backgroundColor: colors.sidebarBg, display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '0.5px solid rgba(99, 153, 34, 0.15)' }}>
+  <aside style={{ width: '220px', maxWidth: '100%', height: '100%', backgroundColor: colors.sidebarBg, display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '0.5px solid rgba(99, 153, 34, 0.15)' }}>
 
     {/* Logo Area */}
     <div style={{ padding: '22px 24px' }}>
@@ -48,7 +54,7 @@ export const Sidebar: FC<{ isOnline: boolean; pendingCount: number; recordCount:
             const badge = item.to === '/records'
               ? (recordCount ? String(recordCount) : undefined)
               : item.badge;
-            return <NavItem key={item.to} icon={item.icon} label={item.label} to={item.to} badge={badge} />;
+            return <NavItem key={item.to} icon={item.icon} label={item.label} to={item.to} badge={badge} onNavigate={onNavigate} />;
           })}
         </div>
       ))}

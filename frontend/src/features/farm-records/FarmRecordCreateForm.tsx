@@ -107,7 +107,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
       className="fade-in-up"
       style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+      <div className="grid-3">
         <div>
           <label style={label}>Activity</label>
           <select value={form.activity_type} onChange={(e) => setActivity(e.target.value as Category)} style={field}>
@@ -135,7 +135,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
         <input type="text" required placeholder="e.g. Maize harvest — 12 bags" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} style={field} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+      <div className="grid-3">
         <div>
           <label style={label}>Quantity</label>
           <input type="number" min="0" step="any" placeholder="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} style={field} />

@@ -3,15 +3,16 @@ import { NavLink } from 'react-router-dom';
 import { colors } from '../../styles/theme';
 
 // A single sidebar navigation link with active styling and an optional badge.
-export const NavItem: FC<{ icon: ReactNode; label: string; to: string; badge?: string }> = ({ icon, label, to, badge }) => (
+export const NavItem: FC<{ icon: ReactNode; label: string; to: string; badge?: string; onNavigate?: () => void }> = ({ icon, label, to, badge, onNavigate }) => (
   <NavLink
     to={to}
+    onClick={onNavigate}
     className="nav-item-hover"
     style={({ isActive }) => ({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '7px 18px',
+      padding: '11px 18px',
       fontSize: '12px',
       textDecoration: 'none',
       transition: 'all 0.2s',

@@ -123,7 +123,7 @@ const InvestorsPage = () => {
         ) : links.length === 0 ? (
           <p style={{ fontSize: '12px', color: colors.textMuted, padding: '16px' }}>No share links yet. Create one above to grant read-only access.</p>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={th}>Label</th>
@@ -155,7 +155,7 @@ const InvestorsPage = () => {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
       </div>
     </div>

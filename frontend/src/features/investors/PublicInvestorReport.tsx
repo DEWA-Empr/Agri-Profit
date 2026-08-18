@@ -99,7 +99,7 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
             {/* P&L by category */}
             <div style={card}>
               <div style={{ padding: '14px 16px', borderBottom: `0.5px solid ${colors.border}`, fontSize: '12px', fontWeight: 700, color: colors.text }}>Profit &amp; Loss by category</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr><th style={th}>Category</th><th style={thRight}>Revenue</th><th style={thRight}>Expenses</th><th style={thRight}>Net</th></tr>
                 </thead>
@@ -121,7 +121,7 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
                     <td style={{ ...tdRight, fontWeight: 700, borderTop: `1px solid ${colors.border}`, color: report.pnl.gross_margin >= 0 ? colors.primaryDark : colors.danger }}>{naira(report.pnl.gross_margin)}</td>
                   </tr>
                 </tfoot>
-              </table>
+              </table></div>
             </div>
 
             {/* Yield by crop */}
@@ -132,7 +132,7 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
               {report.crops.length === 0 ? (
                 <p style={{ fontSize: '12px', color: colors.textMuted, padding: '16px' }}>No crop yield recorded yet.</p>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr><th style={th}>Crop</th><th style={thRight}>Yield</th><th style={thRight}>Unit cost</th><th style={thRight}>Gross margin</th></tr>
                   </thead>
@@ -149,7 +149,7 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
 
