@@ -11,5 +11,13 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    coverage: {
+      // `include` is set deliberately. Without it the v8 provider measures only
+      // the files a test happened to import, which reports ~91% — a figure that
+      // describes the four tested modules, not the frontend. Chapter Four needs
+      // the honest denominator: every source file under src, tested or not.
+      include: ['src/**/*.{ts,tsx}'],
+      reporter: ['text'],
+    },
   },
 })

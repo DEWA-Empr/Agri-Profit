@@ -102,6 +102,26 @@ describe('flushPendingLogs', () => {
     expect(rows).not.toContain(succeeding)
   })
 
+  it('runs one pass at a time when connectivity fires several flushes at once', async () => {
+    // The 'online' event is handled in two places and the on-load flush is a
+    // third caller, so overlapping flushes are the normal case, not a corner
+    // one. Without the single-flight guard both passes read the same undeleted
+    // rows and POST them twice.
+    let accept = () => {}
+    createLog.mockImplementationOnce(() => new Promise((resolve) => { accept = () => resolve(accepted) }))
+    queue()
+    queue()
+
+    const firstPass = flushPendingLogs()
+    const overlapping = flushPendingLogs()  // must return without touching the queue
+    await settle()  // let the first pass reach the POST that is holding it open
+    accept()
+    await Promise.all([firstPass, overlapping])
+
+    expect(createLog).toHaveBeenCalledTimes(2)  // two logs, one pass each
+    expect(rows).toHaveLength(0)
+  })
+
   it('gives up after exactly three failed attempts', async () => {
     createLog.mockRejectedValue(new Error('network down'))
     const log = queue()
@@ -145,6 +165,21 @@ describe('registerSyncListener', () => {
     await settle()
 
     expect(createLog).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not flush on load when the browser is already offline', async () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+    queue()
+
+    const unregister = registerSyncListener()
+    await settle()
+
+    // Posting here would fail and spend a strike on a log that never had a
+    // connection to lose.
+    expect(createLog).not.toHaveBeenCalled()
+
+    unregister()
+    onLine.mockRestore()
   })
 })
 
