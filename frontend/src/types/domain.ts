@@ -117,6 +117,12 @@ export interface DssCropMetrics {
   // null when the crop has no recorded yield, and when units are mixed (a unit
   // cost needs a single denominator).
   unit_cost_of_production?: number | null;
+  // Break-even yield at the price actually realised (revenue / yield_quantity).
+  // RETROSPECTIVE: it says what was needed at the achieved price, not what will
+  // be needed. null whenever no unit price can be derived — mixed units, no
+  // yield, or no revenue.
+  break_even_yield?: number | null;
+  break_even_unit?: string | null;
 }
 
 export interface DssDecisionSupport {

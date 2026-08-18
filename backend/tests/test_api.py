@@ -1159,3 +1159,136 @@ def test_dss_zero_cost_drying_run_survives_the_filter(client):
     assert c["marketable_mass_kg"] == pytest.approx(84.0)       # the reason it survives
     # No cost to divide, so the per-kg cost is a guarded 0.0/None, never junk.
     assert c["unit_cost_per_kg_marketable"] in (None, 0.0)
+
+
+# --- Ranking: best-performing crop first ------------------------------------
+
+def _dss_order(client) -> list:
+    return [c["crop"] for c in client.get("/api/v1/dss/decision-support").json()["crops"]]
+
+
+def test_dss_crops_ranked_by_gross_margin_desc(client):
+    """Three distinct margins come back highest-first, not alphabetically.
+
+    Seeded deliberately so that alphabetical order (cassava, maize, sorghum)
+    and margin order (sorghum, maize, cassava) are exact opposites — an
+    alphabetical regression cannot pass this by accident.
+    """
+    # cassava: +2,000   maize: +5,000   sorghum: +9,000
+    _post_crop_log(client, activity_type="yield", crop="cassava", amount=2000.0, transaction_type="credit")
+    _post_crop_log(client, activity_type="yield", crop="maize", amount=5000.0, transaction_type="credit")
+    _post_crop_log(client, activity_type="yield", crop="sorghum", amount=9000.0, transaction_type="credit")
+
+    assert _dss_order(client) == ["sorghum", "maize", "cassava"]
+
+
+def test_dss_equal_margins_break_ties_alphabetically(client):
+    """Equal margins fall back to crop name ascending, so the order is total.
+
+    Posted in reverse alphabetical order to prove the result comes from the
+    sort key and not from insertion order.
+    """
+    for crop in ("soybean", "rice", "maize"):
+        _post_crop_log(client, activity_type="yield", crop=crop, amount=4000.0, transaction_type="credit")
+
+    order = _dss_order(client)
+    assert order == ["maize", "rice", "soybean"]
+    margins = {c["crop"]: c["gross_margin"] for c in client.get("/api/v1/dss/decision-support").json()["crops"]}
+    assert set(margins.values()) == {4000.0}      # the tie is real, not an artefact
+
+
+# --- Break-even yield: retrospective, guarded, never fabricated -------------
+
+def test_dss_break_even_yield_normal_case(client):
+    """Costs 6,000; sold 100 kg for 10,000 -> price 100/kg -> break-even 60 kg."""
+    _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                   amount=6000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="maize",
+                   amount=10000.0, transaction_type="credit",
+                   quantity=100.0, unit="kg")
+
+    c = _dss_crops(client)["maize"]
+    assert c["break_even_yield"] == pytest.approx(60.0)
+    assert c["break_even_unit"] == "kg"
+    # Sanity: they sold more than break-even, hence a positive margin.
+    assert c["yield_quantity"] > c["break_even_yield"]
+    assert c["gross_margin"] == 4000.0
+
+
+def test_dss_break_even_null_on_mixed_units(client):
+    """Mixed units leave no single quantity to price against."""
+    _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                   amount=6000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="maize",
+                   amount=5000.0, transaction_type="credit", quantity=100.0, unit="kg")
+    _post_crop_log(client, activity_type="yield", crop="maize",
+                   amount=5000.0, transaction_type="credit", quantity=12.0, unit="bags")
+
+    c = _dss_crops(client)["maize"]
+    assert c["yield_quantity"] is None          # the precondition
+    assert c["break_even_yield"] is None
+    assert c["break_even_unit"] is None
+
+
+def test_dss_break_even_null_on_zero_revenue(client):
+    """No sale means no realised price, so break-even is unknowable — not
+    infinite, and not zero."""
+    _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                   amount=6000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="maize",
+                   amount=0.0, transaction_type="credit", quantity=100.0, unit="kg")
+
+    c = _dss_crops(client)["maize"]
+    assert c["revenue"] == 0.0
+    assert c["yield_quantity"] == 100.0         # harvested, but unsold
+    assert c["break_even_yield"] is None
+    assert c["break_even_unit"] is None
+
+
+def test_dss_break_even_null_on_zero_yield(client):
+    """Revenue with nothing harvested recorded: no quantity to price."""
+    _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                   amount=6000.0, transaction_type="debit")
+    _post_crop_log(client, activity_type="yield", crop="maize",
+                   amount=10000.0, transaction_type="credit")   # no quantity
+
+    c = _dss_crops(client)["maize"]
+    assert c["yield_quantity"] == 0.0
+    assert c["break_even_yield"] is None
+    assert c["break_even_unit"] is None
+
+
+def test_dss_break_even_reflects_reversal(client):
+    """A reversed sale removes the realised price, so break-even reverts to None
+    rather than lingering on a price that no longer stands."""
+    _post_crop_log(client, activity_type="fertilizer", crop="maize",
+                   amount=6000.0, transaction_type="debit")
+    sale = _post_crop_log(client, activity_type="yield", crop="maize",
+                          amount=10000.0, transaction_type="credit",
+                          quantity=100.0, unit="kg")
+    assert _dss_crops(client)["maize"]["break_even_yield"] == pytest.approx(60.0)
+
+    assert client.post(f"/api/v1/ledger/logs/{sale.json()['id']}/reverse").status_code == 201
+
+    c = _dss_crops(client)["maize"]
+    assert c["revenue"] == 0.0
+    assert c["break_even_yield"] is None
+
+
+def test_dss_break_even_null_on_zero_expenses(client):
+    """No attributed cost means there is nothing to recover.
+
+    The arithmetic would yield 0, which is true but misleading: it reads as
+    "you broke even on your first kilogram" when it actually means no cost has
+    been tagged to this crop. Undefined is the honest answer.
+    """
+    _post_crop_log(client, activity_type="yield", crop="rice",
+                   amount=20000.0, transaction_type="credit",
+                   quantity=50.0, unit="kg")
+
+    c = _dss_crops(client)["rice"]
+    assert c["expenses"] == 0.0
+    assert c["revenue"] == 20000.0      # revenue and yield both present
+    assert c["yield_quantity"] == 50.0
+    assert c["break_even_yield"] is None    # ...but nothing to break even on
+    assert c["break_even_unit"] is None

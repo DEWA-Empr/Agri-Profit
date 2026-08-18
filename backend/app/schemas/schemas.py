@@ -217,6 +217,14 @@ class DSSCropMetrics(BaseModel):
     # NOT change unit_cost_of_production — they sit beside it, each with one unit.
     marketable_mass_kg: Optional[float] = None
     unit_cost_per_kg_marketable: Optional[float] = None
+    # Break-even yield: the quantity that would have covered this crop's costs
+    # at the price actually realised (revenue / yield_quantity). RETROSPECTIVE —
+    # it reports what was needed at the achieved price, not a forecast. None
+    # whenever no unit price can be derived: mixed units, no yield, or no
+    # revenue. `break_even_unit` mirrors yield_unit so the number is never read
+    # in the wrong unit.
+    break_even_yield: Optional[float] = None
+    break_even_unit: Optional[str] = None
 
 class DSSOverall(BaseModel):
     revenue: float

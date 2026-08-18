@@ -194,6 +194,37 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
         mm = marketable.get(crop)  # None when the crop has no non-reversed runs
         # Guard the division: None/0 marketable mass -> None, never 0 or infinity.
         unit_cost_kg = (b["expenses"] / mm) if (mm and mm > 0) else None
+
+        # Break-even yield: the quantity that would have covered this crop's
+        # costs at the price the farm ACTUALLY realised.
+        #
+        #     unit price       = revenue / yield_quantity
+        #     break-even yield = expenses / unit price
+        #
+        # RETROSPECTIVE, and this matters for how it is described: the price is
+        # derived from realised revenue, so the metric answers "at the price you
+        # actually got, you needed X to cover your costs." It cannot forecast a
+        # break-even before a sale exists — with no revenue there is no price to
+        # divide by, which is why zero revenue yields None rather than infinity.
+        #
+        # None (never a number) whenever the denominator chain is undefined:
+        #   - yq is None    -> mixed units, no single quantity to price against
+        #   - yq == 0       -> nothing harvested, so no unit price exists
+        #   - revenue == 0  -> no realised price; break-even is unknowable, not
+        #                      infinite
+        #   - expenses == 0 -> nothing to recover. The arithmetic gives 0, which
+        #                      is true but useless: it reads as "you broke even
+        #                      on your first kilogram" when what it actually
+        #                      means is that no cost has been tagged to this
+        #                      crop. Reporting nothing is more honest than
+        #                      reporting a zero the farmer would misread.
+        # Consistent with unit_cost_of_production above: undefined rather than
+        # fabricated.
+        break_even_yield = None
+        if yq is not None and yq > 0 and b["revenue"] > 0 and b["expenses"] > 0:
+            unit_price = b["revenue"] / yq
+            break_even_yield = b["expenses"] / unit_price
+
         crops.append({
             "crop": crop,
             "revenue": b["revenue"],
@@ -205,7 +236,21 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
             "unit_cost_of_production": unit_cost,
             "marketable_mass_kg": mm,
             "unit_cost_per_kg_marketable": unit_cost_kg,
+            # Same shape as the yield figures: a quantity plus the unit it is
+            # denominated in, so the two are never read against each other in
+            # different units.
+            "break_even_yield": break_even_yield,
+            "break_even_unit": y_unit if break_even_yield is not None else None,
         })
+
+    # Rank best-performing crop first. The question this panel answers is
+    # "which crop is worth my inputs", so the most profitable belongs at the
+    # top rather than whichever happens to sort first alphabetically.
+    #
+    # Ties break on crop name ascending, which makes the order total and
+    # therefore deterministic — two crops on identical margins always come back
+    # in the same sequence, for tests and for a farmer re-reading the screen.
+    crops.sort(key=lambda c: (-c["gross_margin"], c["crop"]))
 
     pnl = reports_service.get_pnl_report(db, farm_id)
     return {

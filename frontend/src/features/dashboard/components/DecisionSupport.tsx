@@ -51,6 +51,16 @@ const CropRow = ({ c }: { c: DssCropMetrics }) => {
         Revenue {naira(c.revenue)} · Cost {naira(c.expenses)}
         <br />
         {unitCostLine(c, cost)}
+        {/* Break-even is only rendered when the backend derived one. It is
+            retrospective — the price comes from realised revenue — so the
+            wording is past tense: what was needed, not what will be. */}
+        {c.break_even_yield != null && (
+          <>
+            <br />
+            Break-even was {c.break_even_yield.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+            {c.break_even_unit ? ` ${c.break_even_unit}` : ''} at the price you got
+          </>
+        )}
         {/* With more than one harvest unit there is no single total to divide
             by, so we show the breakdown instead of a made-up figure. */}
         {mixedUnits && (
