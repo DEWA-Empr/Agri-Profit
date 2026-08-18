@@ -168,3 +168,84 @@ def test_compute_metrics_with_readings_and_unknown_crop():
     assert m["page"]["n"] == pytest.approx(0.75, rel=1e-4)
     assert m["safe_storage"] is None                 # crop None -> unknown -> None
     assert m["safe_storage_threshold_wb"] is None
+
+
+# --- Fixture F: water balance vs mass difference ----------------------------
+# THE DISCRIMINATING FIXTURE. Neither A nor B can tell the two definitions
+# apart: B conserves dry matter exactly, so mass difference and water balance
+# agree to four decimals, and A's trap assertion compares water_removed against
+# process_loss (16.0 vs 2.2069), which differ under BOTH definitions.
+#
+# This fixture has large, deliberate process loss and asserts the water balance
+# directly, so the two definitions cannot both pass:
+#
+#   mass in  200 kg @ 30 %wb -> water in  60 kg, dry matter 140 kg
+#   mass out 150 kg @ 12 %wb -> water out 18 kg, dry matter 132 kg
+#
+#   TRUE water removed (water balance) = 60 - 18 = 42.0 kg
+#   mass difference                    = 200 - 150 = 50.0 kg
+#   dry matter physically lost         = 140 - 132 = 8.0 kg
+#   and 42.0 + 8.0 = 50.0 — the mass difference is water PLUS lost solids.
+#
+# xfail(strict=True) because the implementation currently returns the mass
+# difference (see water_removed_kg, bioprocess_service.py:90). Strict means the
+# moment the implementation is corrected this XPASSes and pytest FAILS the run,
+# forcing the marker to be removed rather than silently rotting.
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "water_removed_kg returns mass_in - mass_out (a mass difference), which "
+        "counts dry matter lost to spillage as evaporated water. Overstates by "
+        "19.05% on this fixture and 13.64% on Fixture A. Also propagates into "
+        "drying_rate_kg_h and specific_drying_rate."
+    ),
+)
+def test_fixture_f_water_removed_is_a_water_balance_not_a_mass_difference():
+    mass_in, mass_out = 200.0, 150.0
+    m_i, m_f, hours = 30.0, 12.0, 12.0
+
+    m = bs.compute_drying_metrics(
+        mass_in_kg=mass_in,
+        mass_out_kg=mass_out,
+        moisture_initial_wb=m_i,
+        moisture_final_wb=m_f,
+        drying_time_hours=hours,
+        crop=None,
+    )
+
+    water_in = mass_in * m_i / 100.0        # 60.0
+    water_out = mass_out * m_f / 100.0      # 18.0
+    true_water_removed = water_in - water_out   # 42.0
+    mass_difference = mass_in - mass_out        # 50.0
+
+    # The premise of the fixture: the two definitions genuinely disagree here.
+    assert true_water_removed != pytest.approx(mass_difference)
+    # And the gap is exactly the dry matter that left the system.
+    assert mass_difference - true_water_removed == pytest.approx(
+        m["dry_matter_kg"] - mass_out * (1.0 - m_f / 100.0)
+    )
+
+    # The assertion under test: water removed must be the WATER balance.
+    assert m["water_removed_kg"] == pytest.approx(42.0, rel=1e-9)
+
+    # And both derived rates must follow from it, not from the mass difference.
+    assert m["drying_rate_kg_h"] == pytest.approx(42.0 / 12.0, rel=1e-9)          # 3.5
+    assert m["specific_drying_rate"] == pytest.approx(42.0 / (140.0 * 12.0), rel=1e-9)  # 0.025
+
+
+def test_fixture_f_records_current_behaviour_until_resolved():
+    """Companion to Fixture F: pins what the code does TODAY, so the defect is
+    visible in the suite rather than only in an xfail reason.
+
+    Delete this test at the same time as the xfail marker above — the two
+    describe incompatible definitions and must never both be asserted as
+    correct.
+    """
+    m = bs.compute_drying_metrics(
+        mass_in_kg=200.0, mass_out_kg=150.0,
+        moisture_initial_wb=30.0, moisture_final_wb=12.0,
+        drying_time_hours=12.0, crop=None,
+    )
+    assert m["water_removed_kg"] == pytest.approx(50.0)              # mass difference
+    assert m["drying_rate_kg_h"] == pytest.approx(50.0 / 12.0)
+    assert m["specific_drying_rate"] == pytest.approx(50.0 / (140.0 * 12.0))

@@ -1292,3 +1292,69 @@ def test_dss_break_even_null_on_zero_expenses(client):
     assert c["yield_quantity"] == 50.0
     assert c["break_even_yield"] is None    # ...but nothing to break even on
     assert c["break_even_unit"] is None
+
+
+# --- GET /dss/model: the honesty guarantee Chapter 4 leans on ---------------
+# Three states: unauthenticated, trained, and NOT trained. The untrained branch
+# is the one that matters: Chapters 2 (§2.6.4) and 3 (§3.6.5) both state that
+# model quality "is expressed" as R² and MAE, and the prediction page renders
+# those figures. If an untrained model reported zero-valued metrics instead of
+# saying it is untrained, the page would show "R² 0.0000" — which reads as a
+# uselessly bad model rather than as no model at all. That distinction is the
+# whole point, and until now it had no test.
+
+def test_dss_model_requires_authentication(anon_client):
+    """State 1: no token, no metadata. Model quality is farm-agnostic but the
+    route is still behind auth like every other endpoint."""
+    assert anon_client.get("/api/v1/dss/model").status_code == 401
+
+
+def test_dss_model_reports_metrics_when_trained(client):
+    """State 2: trained. R² and MAE are present, numeric, and in range."""
+    # /predict trains on first use if no model exists, so this guarantees one.
+    assert client.post("/api/v1/dss/predict", json={
+        "rainfall": 1200, "fertilizer_used": 50, "soil_ph": 6.5, "crop": "maize",
+    }).status_code == 200
+
+    body = client.get("/api/v1/dss/model").json()
+    assert body["trained"] is True
+    assert "metrics" in body
+
+    r2, mae = body["metrics"]["r2"], body["metrics"]["mae"]
+    assert isinstance(r2, (int, float)) and isinstance(mae, (int, float))
+    assert r2 <= 1.0            # R² is bounded above by 1; below is unbounded
+    assert mae >= 0.0           # an absolute error is never negative
+    # The figures describe a real fit, not a placeholder.
+    assert (r2, mae) != (0.0, 0.0)
+
+    # Enough context to qualify the numbers on the page.
+    assert body["target_unit"]
+    assert body["n_samples"] > 0
+
+
+def test_dss_model_reports_untrained_without_zero_metrics(client, monkeypatch):
+    """State 3: NOT trained. It must SAY so, and must not emit zero-valued
+    metrics that a reader would mistake for a measured result.
+
+    Simulated by pointing the metadata path at a file that does not exist,
+    which is exactly the condition the endpoint branches on.
+    """
+    from backend.app.ml import train
+    monkeypatch.setattr(train, "META_PATH", "/nonexistent/model_meta.json")
+
+    response = client.get("/api/v1/dss/model")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["trained"] is False
+    # The honesty guarantee, asserted explicitly: absent, never zero.
+    assert "metrics" not in body
+    assert body.get("metrics") is None
+    for key in ("r2", "mae"):
+        assert key not in body
+    # No zero-valued NUMERIC field can be mistaken for a metric. bool is
+    # excluded deliberately: in Python isinstance(False, int) is True and
+    # False == 0, so `trained: false` — the very field carrying the honest
+    # answer — would otherwise trip this check.
+    numeric = [v for v in body.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    assert not any(v == 0 for v in numeric)
