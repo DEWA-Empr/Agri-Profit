@@ -25,18 +25,22 @@ def test_fixture_a_maize_with_process_loss():
     assert m["mass_out_expected_kg"] == pytest.approx(86.2069, rel=1e-4)
     assert m["process_loss_kg"] == pytest.approx(2.2069, rel=1e-4)
     assert m["process_loss_pct"] == pytest.approx(2.560, rel=1e-4)
-    assert m["water_removed_kg"] == pytest.approx(16.0, rel=1e-4)
+    # Water BALANCE: water in 25.00 - water out 10.92. Was 16.0 while this was
+    # computed as mass_in - mass_out; the 1.92 kg difference is dry matter
+    # that physically left, not water (see water_removed_kg).
+    assert m["water_removed_kg"] == pytest.approx(14.08, rel=1e-4)
+    assert m["drying_rate_kg_h"] == pytest.approx(1.408, rel=1e-4)
     assert m["moisture_initial_db"] == pytest.approx(33.3333, rel=1e-4)
     assert m["moisture_final_db"] == pytest.approx(14.9425, rel=1e-4)
     assert m["moisture_ratio_final"] == pytest.approx(0.448276, rel=1e-4)
     assert m["newton_k"] == pytest.approx(0.080235, rel=1e-4)
-    assert m["specific_drying_rate"] == pytest.approx(16.0 / (75.0 * 10.0), rel=1e-4)
+    assert m["specific_drying_rate"] == pytest.approx(14.08 / (75.0 * 10.0), rel=1e-4)
     assert m["safe_storage"] is True  # maize threshold 13.0, final 13.0 -> at threshold
     assert m["safe_storage_threshold_wb"] == pytest.approx(13.0)
     assert m["process_loss_warning"] is False
     assert m["page"] is None  # no intermediate readings supplied
 
-    # THE TRAP: water_removed (from actual outlet, 16.0) and process_loss (actual
+    # THE TRAP: water_removed (water balance, 14.08) and process_loss (actual
     # vs dry-matter-predicted outlet, 2.2069) are different numbers. If they ever
     # come out equal, the two have been conflated.
     assert m["water_removed_kg"] != pytest.approx(m["process_loss_kg"])
@@ -187,19 +191,10 @@ def test_compute_metrics_with_readings_and_unknown_crop():
 #   dry matter physically lost         = 140 - 132 = 8.0 kg
 #   and 42.0 + 8.0 = 50.0 — the mass difference is water PLUS lost solids.
 #
-# xfail(strict=True) because the implementation currently returns the mass
-# difference (see water_removed_kg, bioprocess_service.py:90). Strict means the
-# moment the implementation is corrected this XPASSes and pytest FAILS the run,
-# forcing the marker to be removed rather than silently rotting.
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "water_removed_kg returns mass_in - mass_out (a mass difference), which "
-        "counts dry matter lost to spillage as evaporated water. Overstates by "
-        "19.05% on this fixture and 13.64% on Fixture A. Also propagates into "
-        "drying_rate_kg_h and specific_drying_rate."
-    ),
-)
+# This asserted the correct physics against an implementation that did not
+# yet do it, and was xfail(strict=True) until water_removed_kg was corrected
+# to a water balance. It now passes, and stands as the regression guard: if
+# anyone reverts to a mass difference this is the test that catches it.
 def test_fixture_f_water_removed_is_a_water_balance_not_a_mass_difference():
     mass_in, mass_out = 200.0, 150.0
     m_i, m_f, hours = 30.0, 12.0, 12.0
@@ -232,20 +227,3 @@ def test_fixture_f_water_removed_is_a_water_balance_not_a_mass_difference():
     assert m["drying_rate_kg_h"] == pytest.approx(42.0 / 12.0, rel=1e-9)          # 3.5
     assert m["specific_drying_rate"] == pytest.approx(42.0 / (140.0 * 12.0), rel=1e-9)  # 0.025
 
-
-def test_fixture_f_records_current_behaviour_until_resolved():
-    """Companion to Fixture F: pins what the code does TODAY, so the defect is
-    visible in the suite rather than only in an xfail reason.
-
-    Delete this test at the same time as the xfail marker above — the two
-    describe incompatible definitions and must never both be asserted as
-    correct.
-    """
-    m = bs.compute_drying_metrics(
-        mass_in_kg=200.0, mass_out_kg=150.0,
-        moisture_initial_wb=30.0, moisture_final_wb=12.0,
-        drying_time_hours=12.0, crop=None,
-    )
-    assert m["water_removed_kg"] == pytest.approx(50.0)              # mass difference
-    assert m["drying_rate_kg_h"] == pytest.approx(50.0 / 12.0)
-    assert m["specific_drying_rate"] == pytest.approx(50.0 / (140.0 * 12.0))

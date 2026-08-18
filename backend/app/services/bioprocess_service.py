@@ -87,10 +87,44 @@ def process_loss(
 
 # --- 4.3 Water removed and drying rate -------------------------------------
 
-def water_removed_kg(mass_in_kg: float, mass_out_actual_kg: float) -> float:
-    """Water removed uses the ACTUAL recorded outlet mass, not the predicted one.
-    (Deliberately distinct from process_loss, which uses the predicted outlet.)"""
-    return mass_in_kg - mass_out_actual_kg
+def water_removed_kg(
+    mass_in_kg: float,
+    mass_out_actual_kg: float,
+    moisture_initial_wb: float,
+    moisture_final_wb: float,
+) -> float:
+    """Water evaporated during the run, as a WATER BALANCE:
+
+        water_in  = mass_in  · M_i_wb/100
+        water_out = mass_out · M_f_wb/100
+        removed   = water_in − water_out
+
+    This was previously `mass_in − mass_out`, which is a MASS difference and is
+    only equal to the water removed when dry matter is conserved. Whenever a run
+    has process loss, the mass difference decomposes into evaporated water PLUS
+    dry matter that physically left the system (spillage, handling), and the
+    old form attributed all of it to water:
+
+        Fixture A: 100 kg @ 25 %wb -> 84 kg @ 13 %wb
+          water in  25.00, water out 10.92  -> removed 14.08 kg   <- correct
+          mass difference                    ->         16.00 kg   <- old value
+          dry matter lost (75.00 - 73.08)    ->          1.92 kg
+          and 14.08 + 1.92 = 16.00 exactly.
+
+    The overstatement is proportional to process loss: 13.64% on Fixture A,
+    19.05% on Fixture F. It propagated into drying_rate_kg_h and
+    specific_drying_rate, and through them into the per-crop aggregates.
+
+    The moisture arguments are REQUIRED, not optional: a default would let a
+    caller silently fall back to the mass-difference behaviour this replaces.
+
+    Cannot go negative — the schema validator enforces final moisture strictly
+    below initial and outlet mass no greater than inlet, so water_out < water_in
+    always.
+    """
+    water_in = mass_in_kg * moisture_initial_wb / 100.0
+    water_out = mass_out_actual_kg * moisture_final_wb / 100.0
+    return water_in - water_out
 
 
 def drying_rate_kg_h(water_removed: float, drying_time_hours: float) -> float:
@@ -221,7 +255,9 @@ def compute_drying_metrics(
     loss_kg, loss_pct = process_loss(
         mass_in_kg, moisture_initial_wb, moisture_final_wb, mass_out_kg
     )
-    removed = water_removed_kg(mass_in_kg, mass_out_kg)
+    removed = water_removed_kg(
+        mass_in_kg, mass_out_kg, moisture_initial_wb, moisture_final_wb
+    )
 
     page = None
     if readings:

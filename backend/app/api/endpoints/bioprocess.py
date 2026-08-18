@@ -88,7 +88,12 @@ def get_bioprocess_summary(
                 "safe_met": 0,
             },
         )
-        water = bioprocess_service.water_removed_kg(params.mass_in_kg, params.mass_out_kg)
+        water = bioprocess_service.water_removed_kg(
+            params.mass_in_kg,
+            params.mass_out_kg,
+            params.moisture_initial_wb,
+            params.moisture_final_wb,
+        )
         rate = bioprocess_service.drying_rate_kg_h(water, params.drying_time_hours)
         k = bioprocess_service.newton_k(
             params.moisture_initial_wb, params.moisture_final_wb, params.drying_time_hours

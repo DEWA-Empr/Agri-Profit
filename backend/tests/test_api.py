@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 
 
@@ -553,10 +555,31 @@ def test_tampered_jwt_rejected(client):
     # bearer token is present — so a forged token can't impersonate a farm.
     valid = client.headers["Authorization"].split(" ", 1)[1]
     header, payload, signature = valid.split(".")
-    # Flip the final signature character to a guaranteed-different one (staying in
-    # the base64url alphabet), so the HMAC no longer matches the payload.
-    forged_last = "A" if signature[-1] != "A" else "B"
-    tampered = f"{header}.{payload}.{signature[:-1]}{forged_last}"
+    # Flip the FIRST signature character, not the last.
+    #
+    # An HS256 signature is 32 bytes, which base64url-encodes to 43 characters
+    # once padding is stripped. 43 x 6 = 258 bits carrying 256 bits of data, so
+    # the LAST character contributes only 4 significant bits — its low 2 bits are
+    # padding and are discarded on decode. Four of the 64 alphabet characters
+    # therefore decode to the same byte as "A", so flipping the last character to
+    # "A"/"B" left the signature bytes UNCHANGED for ~6.2% of tokens. The token
+    # stayed valid, /auth/me correctly returned 200, and this test failed —
+    # intermittently, roughly one run in sixteen.
+    #
+    # The first character carries all 6 of its bits, so flipping it always
+    # changes the decoded signature. Zero collisions.
+    forged_first = "A" if signature[0] != "A" else "B"
+    tampered = f"{header}.{payload}.{forged_first}{signature[1:]}"
+
+    # Guard the premise: if the tamper ever stops changing the decoded bytes,
+    # fail here with a clear reason rather than as a confusing 200 != 401.
+    def _decode(seg: str) -> bytes:
+        return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+    assert _decode(tampered.split(".")[2]) != _decode(signature), (
+        "the tampered signature decodes to the same bytes as the valid one, "
+        "so this test would be asserting nothing"
+    )
 
     resp = client.get(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {tampered}"}
@@ -892,7 +915,8 @@ def test_bioprocess_detail_returns_params_and_metrics(client):
     m = data["metrics"]
     assert m["dry_matter_kg"] == pytest.approx(75.0, rel=1e-4)
     assert m["process_loss_kg"] == pytest.approx(2.2069, rel=1e-4)
-    assert m["water_removed_kg"] == pytest.approx(16.0, rel=1e-4)
+    # Water balance: 100*0.25 - 84*0.13 = 25.00 - 10.92 = 14.08 kg.
+    assert m["water_removed_kg"] == pytest.approx(14.08, rel=1e-4)
     assert m["newton_k"] == pytest.approx(0.080235, rel=1e-4)
     assert m["safe_storage"] is True
     assert m["page"] is None
@@ -934,7 +958,9 @@ def test_bioprocess_summary_aggregates_per_crop(client):
     assert maize["drying_runs"] == 2
     assert maize["total_mass_in_kg"] == pytest.approx(300.0)
     assert maize["total_marketable_mass_kg"] == pytest.approx(84.0 + 168.0)
-    assert maize["total_water_removed_kg"] == pytest.approx(16.0 + 32.0)
+    # Water balance per run, then summed. Run 1: 25.00 - 10.92 = 14.08.
+    # Run 2 is exactly double the mass: 50.00 - 21.84 = 28.16.
+    assert maize["total_water_removed_kg"] == pytest.approx(14.08 + 28.16)
     assert maize["safe_storage_share"] == pytest.approx(1.0)  # both final 13.0 <= 13.0
     assert "SUN" in maize["mean_newton_k_by_method"]
 
