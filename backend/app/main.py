@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +22,21 @@ if not logger.handlers:
     logger.addHandler(_handler)
     logger.propagate = False
 
-app = FastAPI(title="AgriProfit API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup work: train the DSS yield model if the image has none baked in."""
+    try:
+        from .ml import train
+
+        if train.ensure_model():
+            logger.info("DSS model trained on startup")
+    except Exception:  # never block API startup on an ML failure
+        logger.exception("DSS model startup training failed")
+    yield
+
+
+app = FastAPI(title="AgriProfit API", version="0.1.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -54,18 +69,6 @@ async def handle_unexpected_error(request: Request, exc: Exception):
     """Last-resort handler: log the traceback, return a generic 500 (no leak)."""
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
-
-
-@app.on_event("startup")
-def ensure_dss_model() -> None:
-    """Train the DSS yield model on boot if the image has none baked in."""
-    try:
-        from .ml import train
-
-        if train.ensure_model():
-            logger.info("DSS model trained on startup")
-    except Exception:  # never block API startup on an ML failure
-        logger.exception("DSS model startup training failed")
 
 
 app.include_router(api_router, prefix="/api/v1")
