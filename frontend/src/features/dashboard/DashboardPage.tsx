@@ -1,12 +1,28 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { FC } from 'react';
 import { ledgerService } from '../../lib/apiClient';
 import type { Summary } from '../../types/domain';
 import { MetricCard } from './components/MetricCard';
-import { PnlChart } from './components/PnlChart';
-import { CostBreakdown } from './components/CostBreakdown';
+import { colors } from '../../styles/theme';
 import { DecisionSupport } from './components/DecisionSupport';
 import { DashboardOnboarding } from './components/DashboardOnboarding';
+
+// The two charts are the only recharts consumers in the app (~360 kB of the
+// bundle). Loading them lazily lets the KPI row and decision-support table
+// paint immediately on a slow rural link, with the charts filling in after.
+const PnlChart = lazy(() => import('./components/PnlChart').then((m) => ({ default: m.PnlChart })));
+const CostBreakdown = lazy(() => import('./components/CostBreakdown').then((m) => ({ default: m.CostBreakdown })));
+
+// Reserves the chart's footprint while its chunk loads so the page below it
+// does not jump when the charts arrive.
+const ChartPlaceholder = () => (
+  <div style={{
+    background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`,
+    padding: '20px', minHeight: '260px', fontSize: '12px', color: colors.labelText,
+  }}>
+    Loading chart…
+  </div>
+);
 
 // Abbreviate large Naira figures the way the #04 mockup does (₦42.85M),
 // falling back to full numbers for small values.
@@ -54,8 +70,12 @@ const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
 
       {/* TREND + COST */}
       <div className="split-row">
-        <PnlChart />
-        <CostBreakdown />
+        <Suspense fallback={<ChartPlaceholder />}>
+          <PnlChart />
+        </Suspense>
+        <Suspense fallback={<ChartPlaceholder />}>
+          <CostBreakdown />
+        </Suspense>
       </div>
 
       {/* DECISIONS — per-crop metrics from the real ledger. (The former "Field

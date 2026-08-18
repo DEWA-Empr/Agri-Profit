@@ -199,10 +199,14 @@ grounded rather than aspirational.
   `farm_id`, but joins `operational_logs` by a sequential scan because
   `financial_transaction_id` is unindexed — trivial now, worth an index before the
   data grows.
-- **The frontend ships as a single bundle.** The production build is one
-  ~245 KB-gzip JavaScript chunk with no code-splitting. On the slow rural
-  connections the project explicitly targets, first-load cost matters;
-  route-level splitting is deferred future work.
+- **The entry bundle is still large, though no longer monolithic.** The
+  production build was one ~245 KB-gzip chunk; every route is now `React.lazy`-
+  loaded, and the two recharts-backed dashboard charts are lazy again inside
+  their page, which brings first paint down to a ~132 KB-gzip entry chunk with
+  the 82 KB charting code arriving separately and only where it is used. What
+  remains is the entry chunk itself (React, router, axios, Dexie), which no
+  amount of route splitting reduces — trimming it further means removing or
+  replacing a dependency, not deferring one.
 - **No load, stress, or soak testing** was performed, and the test suite runs
   against SQLite while production uses PostgreSQL, so dialect-specific behaviour
   at scale is unverified (the reporting code deliberately avoids dialect-specific
@@ -238,7 +242,8 @@ second are larger capabilities that extend it.
 3. Scope or clear the offline write queue on authentication change (§5).
 4. Eager-load the financial transaction in the ledger list and add an index on
    `operational_logs.financial_transaction_id` (§7).
-5. Route-level code-splitting of the frontend bundle (§7).
+5. Trim the frontend entry chunk itself — route-level code-splitting is done
+   (§7), so the remaining win is dependency-level, not structural.
 
 **Medium-term platform maturity:**
 
