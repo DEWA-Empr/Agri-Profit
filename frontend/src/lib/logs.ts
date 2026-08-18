@@ -1,8 +1,15 @@
 import { db } from './db';
 import { ledgerService } from './apiClient';
-import type { OperationalLogCreate } from '../types/domain';
+import type { OperationalLog, OperationalLogCreate } from '../types/domain';
 
-export type LogSaveResult = 'saved' | 'offline' | 'queued';
+// A discriminated union rather than a bare string: a record that reached the
+// server carries the created log back, which is what a caller needs to read
+// server-computed follow-ups (e.g. a drying run's metrics from /bioprocess/{id}).
+// A queued record has no id yet, and the type makes that impossible to forget.
+export type LogSaveResult =
+  | { status: 'saved'; log: OperationalLog }
+  | { status: 'offline' }
+  | { status: 'queued' };
 
 // Offline-first save of an operational log (with its paired financial
 // transaction). The caller passes the payload WITHOUT a client_id — a fresh
@@ -24,13 +31,13 @@ export async function saveOperationalLog(
 
   if (!isOnline) {
     await queue();
-    return 'offline';
+    return { status: 'offline' };
   }
   try {
-    await ledgerService.createLog(full);
-    return 'saved';
+    const res = await ledgerService.createLog(full);
+    return { status: 'saved', log: res.data };
   } catch {
     await queue();
-    return 'queued';
+    return { status: 'queued' };
   }
 }

@@ -3,21 +3,25 @@ import { Save } from 'lucide-react';
 import type { Category, TransactionType, OperationalLogCreate } from '../../types/domain';
 import { saveOperationalLog } from '../../lib/logs';
 import { colors } from '../../styles/theme';
+import { DryingFields } from './DryingFields';
+import { buildDryingParams, emptyDryingForm, type DryingForm } from './dryingParams';
+import { DryingRunResult } from './DryingRunResult';
 
-// NOTE: "Bioprocess" is deliberately absent. The backend requires a valid
-// DryingParams payload on any bioprocess log (schemas.OperationalLogCreate
-// ._validate_bioprocess_payload) and this form has no way to collect one, so
-// choosing it produced a guaranteed 422. That is worse than a plain error:
-// saveOperationalLog treats the failure as a network problem and queues the
-// record in IndexedDB, where it re-fails on every flush, exhausts its retries
-// and sits there permanently — with a Retry button that can never succeed.
-// Re-add this option only together with the drying-parameter fields.
+// "Post-harvest drying" (bioprocess) is only safe to offer alongside the
+// drying-parameter fields: the backend rejects a bioprocess log whose
+// extra_data is not a valid DryingParams payload (schemas.OperationalLogCreate
+// ._validate_bioprocess_payload), and saveOperationalLog cannot tell that 422
+// from a network failure — it would queue the record in IndexedDB, where it
+// would re-fail on every flush until its retries ran out. So the option and
+// the fields ship together, with the payload validated client-side before it
+// can ever reach the queue (see DryingFields.buildDryingParams).
 const CATEGORIES: { value: Category; label: string }[] = [
   { value: 'yield', label: 'Crop yield / sale' },
   { value: 'seed', label: 'Seed' },
   { value: 'fertilizer', label: 'Fertilizer' },
   { value: 'labour', label: 'Labour' },
   { value: 'mechanization', label: 'Mechanization' },
+  { value: 'bioprocess', label: 'Post-harvest drying' },
   { value: 'other', label: 'Other' },
 ];
 
@@ -56,8 +60,16 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
     amount: '',
     tax_category: '',
   });
+  const [drying, setDrying] = useState<DryingForm>(emptyDryingForm);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  // Set once a drying run has been written to the server: the form is replaced
+  // by its computed metrics rather than closing silently, because the numbers
+  // that matter (water removed, process loss, safe-storage verdict) only exist
+  // after the backend has seen the run.
+  const [savedDryingId, setSavedDryingId] = useState<number | null>(null);
+
+  const isDrying = form.activity_type === 'bioprocess';
 
   const setActivity = (value: Category) =>
     // Re-default the debit/credit choice to match the new activity (still overridable).
@@ -65,6 +77,20 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+
+    // Validate the drying payload BEFORE anything is queued: an invalid one is
+    // a permanent 422, and a permanent 422 in the offline queue is a record
+    // that can never sync.
+    let extraData: Record<string, unknown> | undefined;
+    if (isDrying) {
+      const built = buildDryingParams(drying);
+      if ('error' in built) {
+        setMessage(built.error);
+        return;
+      }
+      extraData = { ...built.params };
+    }
+
     setSaving(true);
     setMessage('');
 
@@ -74,6 +100,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
       description: form.description || undefined,
       quantity: form.quantity ? parseFloat(form.quantity) : undefined,
       unit: form.unit || undefined,
+      extra_data: extraData,
       financial_data: {
         amount: parseFloat(form.amount),
         transaction_type: form.transaction_type,
@@ -86,11 +113,17 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
     const result = await saveOperationalLog(payload, isOnline);
     setSaving(false);
 
-    if (result === 'saved') {
+    if (result.status === 'saved') {
       onSaved();
-      onClose();
-    } else if (result === 'offline') {
-      setMessage('Saved offline — will sync when connected.');
+      if (isDrying) {
+        setSavedDryingId(result.log.id);
+      } else {
+        onClose();
+      }
+    } else if (result.status === 'offline') {
+      setMessage(isDrying
+        ? 'Saved offline — drying metrics will be available once it syncs.'
+        : 'Saved offline — will sync when connected.');
       onSaved();
     } else {
       setMessage('Network error — saved offline. Will retry when connected.');
@@ -100,6 +133,10 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
 
   const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: colors.labelText, display: 'block', marginBottom: '4px' };
   const field: CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '12px', boxSizing: 'border-box' };
+
+  if (savedDryingId !== null) {
+    return <DryingRunResult logId={savedDryingId} onDone={onClose} />;
+  }
 
   return (
     <form
@@ -148,10 +185,15 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
           </select>
         </div>
         <div>
-          <label style={label}>Amount (₦)</label>
+          {/* A sun-dried lot with the farm's own labour genuinely costs ₦0, and
+              0 is accepted: every operational log keeps its paired transaction,
+              so the pairing invariant holds even for a free process. */}
+          <label style={label}>Amount (₦){isDrying && <span style={{ color: colors.textFaint, fontWeight: 400 }}> — 0 is fine for sun drying</span>}</label>
           <input type="number" required min="0" step="0.01" placeholder="0.00" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={field} />
         </div>
       </div>
+
+      {isDrying && <DryingFields value={drying} onChange={setDrying} label={label} field={field} />}
 
       <div>
         <label style={label}>Tax category <span style={{ color: colors.textFaint, fontWeight: 400 }}>(optional)</span></label>

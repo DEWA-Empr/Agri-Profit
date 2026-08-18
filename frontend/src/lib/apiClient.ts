@@ -14,6 +14,8 @@ import type {
   ShareLink,
   ShareLinkMinted,
   InvestorReport,
+  BioprocessDetail,
+  BioprocessSummary,
 } from '../types/domain';
 import { getToken, clearToken } from './authToken';
 
@@ -92,6 +94,15 @@ export const ledgerService = {
   // this is the only correction mechanism. 409 if the target is itself a
   // reversal or has already been reversed; 404 if it isn't this farm's.
   reverseLog: (id: number) => api.post<OperationalLog>(`/ledger/logs/${id}/reverse`),
+};
+
+// Read-only. Drying runs are CREATED through ledgerService.createLog with a
+// DryingParams payload in extra_data — there is deliberately no second write
+// path (see backend/app/api/endpoints/bioprocess.py).
+export const bioprocessService = {
+  getRun: (id: number) => api.get<BioprocessDetail>(`/bioprocess/${id}`),
+  getSummary: (crop?: string) =>
+    api.get<BioprocessSummary>('/bioprocess/summary', { params: crop ? { crop } : undefined }),
 };
 
 export const equipmentService = {

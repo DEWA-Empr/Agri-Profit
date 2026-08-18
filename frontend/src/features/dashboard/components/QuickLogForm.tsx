@@ -35,10 +35,10 @@ export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCou
 
     const result = await saveOperationalLog(payload, isOnline);
     setForm({ ...form, item: '', amount: '' });
-    if (result === 'saved') {
+    if (result.status === 'saved') {
       setSaveMessage('');
       onSaved();
-    } else if (result === 'offline') {
+    } else if (result.status === 'offline') {
       setSaveMessage('Saved offline — will sync when connected.');
     } else {
       setSaveMessage('Network error — saved offline. Will retry when connected.');

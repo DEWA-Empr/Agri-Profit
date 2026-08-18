@@ -130,6 +130,98 @@ export interface DssDecisionSupport {
   overall: { revenue: number; expenses: number; gross_margin: number };
 }
 
+// --- Bioprocess: post-harvest drying (ticket 08) ---
+// A drying run is an OperationalLog with activity_type 'bioprocess' whose
+// extra_data carries a DryingParams payload. There is no separate create
+// endpoint: runs are written through POST /ledger/logs like any other log, and
+// read back — with every derived metric computed on the fly — from /bioprocess.
+
+export type DryingMethod = 'SUN' | 'SOLAR_DRYER' | 'MECHANICAL' | 'AMBIENT';
+
+// An optional intermediate moisture measurement during the run. Three or more
+// usable readings unlock the Page-model fit; fewer and only Newton is reported.
+export interface DryingReading {
+  time_hours: number;
+  moisture_wb: number;
+}
+
+// Mirrors backend schemas.DryingParams. Moisture is always **wet basis** here —
+// what a field meter reads. The dry-basis conversion happens server-side.
+export interface DryingParams {
+  process_type: 'DRYING';
+  method: DryingMethod;
+  mass_in_kg: number;
+  mass_out_kg: number;
+  moisture_initial_wb: number;
+  moisture_final_wb: number;
+  drying_time_hours: number;
+  air_temperature_c?: number | null;
+  readings?: DryingReading[];
+}
+
+// The linearised Page fit. null on the metrics when there were fewer than three
+// usable readings — the backend never fabricates a fit.
+export interface DryingPageFit {
+  n: number;
+  k: number;
+  r2_linear: number;
+  n_used: number;
+  n_dropped: number;
+}
+
+// Mirrors backend schemas.DryingMetrics — all computed on read, never stored.
+export interface DryingMetrics {
+  dry_matter_kg: number;
+  // Outlet mass predicted by dry-matter conservation, and the signed gap
+  // between it and what was actually weighed out.
+  mass_out_expected_kg: number;
+  process_loss_kg: number;
+  process_loss_pct: number;
+  // Set when |process_loss_pct| > 5: a data-quality signal, not an error.
+  process_loss_warning: boolean;
+  // A water balance — (mass_in x M_i) - (mass_out x M_f) — not the mass
+  // difference. The two are only equal when dry matter is conserved; where
+  // there is process loss, the mass difference also contains dry matter that
+  // physically left the system.
+  water_removed_kg: number;
+  drying_rate_kg_h: number;
+  specific_drying_rate: number;
+  moisture_initial_db: number;
+  moisture_final_db: number;
+  moisture_ratio_final: number;
+  newton_k: number;
+  page?: DryingPageFit | null;
+  // null — not false — when the crop is outside the safe-storage table, or when
+  // no crop was recorded. An unknown crop is never assumed unsafe.
+  safe_storage?: boolean | null;
+  safe_storage_threshold_wb?: number | null;
+}
+
+// GET /bioprocess/{id}
+export interface BioprocessDetail {
+  id: number;
+  crop?: string | null;
+  params: DryingParams;
+  metrics: DryingMetrics;
+}
+
+// GET /bioprocess/summary — per-crop aggregates. Reversed runs and reversal
+// contras are excluded server-side, so these totals are a real mass balance.
+export interface BioprocessCropSummary {
+  crop: string;
+  drying_runs: number;
+  total_mass_in_kg: number;
+  total_marketable_mass_kg: number;
+  total_water_removed_kg: number;
+  mean_drying_rate_kg_h: number;
+  mean_newton_k_by_method: Record<string, number>;
+  safe_storage_share?: number | null;
+}
+
+export interface BioprocessSummary {
+  crops: BioprocessCropSummary[];
+}
+
 // --- Investor share links (ticket 05) ---
 // Owner-facing metadata for a share link. The token is NEVER present here — only
 // its hash is stored server-side — so a lost link must be re-minted.

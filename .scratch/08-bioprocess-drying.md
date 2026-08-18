@@ -300,3 +300,47 @@ The fit must recover `n = 0.750000`, `k = 0.300000`, linearised R² = `1.000000`
 Storage-condition monitoring; starch hydrolysis; rehydration; equilibrium moisture content modelling (we neglect `M_e` and say so); multi-stage drying runs; energy consumption and specific energy per kg water removed; anything touching the ML forecast tier.
 
 If you find yourself editing `ml/`, stop — you have gone out of scope.
+
+---
+
+## Comments
+
+### 2026-08-19 — Phase 6 (frontend) implemented
+
+Phases 1–5 were already on `feat/bioprocess-drying`; Phase 6 was the outstanding
+gap — the backend shipped `/bioprocess/*` with no frontend consumer at all, and
+`FarmRecordCreateForm` had removed the Bioprocess option outright (its comment
+explained why: an unvalidatable payload would have poisoned the offline queue).
+
+Built to §7's "minimum viable":
+
+- `types/domain.ts` — mirrors of `DryingParams`, `DryingMetrics`,
+  `BioprocessDetail`, `BioprocessCropSummary`, `BioprocessSummary`.
+- `lib/apiClient.ts` — `bioprocessService` (read-only: `getRun`, `getSummary`).
+  Runs are still created through `ledgerService.createLog`; no second write path.
+- `farm-records/dryingParams.ts` — form state + `buildDryingParams`, which
+  mirrors the backend field bounds **and** `_check_physical_consistency`. This
+  is what makes the Bioprocess option safe to re-offer: an invalid payload is
+  rejected before it can be queued in IndexedDB, so the permanently-422 record
+  the old comment warned about cannot be created. Unit-tested against Fixture D
+  in `dryingParams.test.ts`.
+- `farm-records/DryingFields.tsx` — method, mass in/out, moisture in/out (wet
+  basis), drying time, optional air temperature; shown only for Bioprocess.
+- `farm-records/DryingRunResult.tsx` — the result panel: water removed, drying
+  rate, process loss (kg, %, against the dry-matter-predicted outlet), the
+  safe-storage verdict as a pass / fail / unknown chip (unknown crop shows as
+  unknown, never as a failure), plus dry matter, moisture ratio and Newton k
+  with the Page fit when the run has one.
+
+Verified end to end against the running API: the exact payload the form emits
+creates a run (201), `GET /bioprocess/{id}` returns every field the panel reads,
+`GET /bioprocess/summary` aggregates it, and `mass_out_kg > mass_in_kg` is a 422
+that the client-side validator also blocks.
+
+Not built (§7 "if time allows"): the drying-curve chart. It needs intermediate
+readings, and the form does not collect them yet — a curve through two endpoints
+would just be the Newton fit drawn back at itself. Collecting `readings[]` is
+the natural next slice, and it is also what unlocks the Page model in the UI.
+
+Note for §8: Fixture A's `water_removed_kg = 16.0 kg` is superseded by commit
+8690289 — water removed is a water balance (14.08 kg), not the mass difference.
