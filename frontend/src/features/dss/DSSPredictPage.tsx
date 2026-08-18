@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import axios from 'axios';
 import { BrainCircuit, Play, BarChart3, Info, AlertTriangle } from 'lucide-react';
 import { dssService, type DssPrediction, type DssPredictInput, type DssModelInfo } from '../../lib/apiClient';
 import { colors } from '../../styles/theme';
@@ -50,9 +51,9 @@ const DSSPredictPage = () => {
     try {
       const res = await dssService.predict(inputs);
       setPrediction(res.data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPrediction(null);
-      const status = err?.response?.status;
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       if (status === 503) {
         setError('The model is still warming up. Try again in a moment.');
       } else if (status === 422) {

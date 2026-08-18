@@ -109,7 +109,7 @@ const EquipmentPage = () => {
       )}
 
       {maintenanceFor && (
-        <MaintenancePanel equipment={maintenanceFor} onClose={() => setMaintenanceFor(null)} />
+        <MaintenancePanel key={maintenanceFor.id} equipment={maintenanceFor} onClose={() => setMaintenanceFor(null)} />
       )}
     </div>
   );

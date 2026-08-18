@@ -16,9 +16,11 @@ export const MaintenancePanel = ({ equipment, onClose }: { equipment: Equipment;
   const [error, setError] = useState('');
   const [form, setForm] = useState({ description: '', cost: '' });
 
+  // Loads once per mount. The panel is keyed by equipment id at the call site,
+  // so selecting a different machine remounts it and `loading` starts true
+  // again — no synchronous setState in the effect body, no cascading render.
   useEffect(() => {
     let active = true;
-    setLoading(true);
     equipmentService.getMaintenance(equipment.id)
       .then((res) => { if (active) setLogs(res.data); })
       .catch(() => { if (active) setError('Could not load maintenance history.'); })

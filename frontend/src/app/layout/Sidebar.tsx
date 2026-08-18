@@ -2,7 +2,7 @@ import { useEffect, useState, type FC } from 'react';
 import { Leaf } from 'lucide-react';
 import { NavItem } from './NavItem';
 import { SyncStatus } from './SyncStatus';
-import { navSections } from '../router';
+import { navSections } from '../navigation';
 import { authService } from '../../lib/apiClient';
 import { colors } from '../../styles/theme';
 
