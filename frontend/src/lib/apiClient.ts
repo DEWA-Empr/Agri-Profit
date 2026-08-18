@@ -111,6 +111,19 @@ export interface DssPrediction {
   feature_importances: Record<string, number>;
 }
 
+// Metadata for the trained yield model, from GET /dss/model. `trained` is
+// false when no model has been fitted yet, in which case NOTHING else is
+// present — callers must not read metrics off an untrained response.
+export interface DssModelInfo {
+  trained: boolean;
+  metrics?: { r2: number; mae: number };
+  n_samples?: number;
+  n_estimators?: number;
+  target?: string;
+  target_unit?: string;
+  trained_at?: string;
+}
+
 // Predict request: three numeric field conditions plus the crop to forecast.
 export interface DssPredictInput {
   rainfall: number;
@@ -122,6 +135,8 @@ export interface DssPredictInput {
 export const dssService = {
   predict: (data: DssPredictInput) => api.post<DssPrediction>('/dss/predict', data),
   train: () => api.post('/dss/train'),
+  // Model quality metadata (R², MAE, sample count, train time).
+  getModel: () => api.get<DssModelInfo>('/dss/model'),
   // Tier 1: deterministic per-crop metrics computed from the real ledger.
   getDecisionSupport: () => api.get<DssDecisionSupport>('/dss/decision-support'),
 };

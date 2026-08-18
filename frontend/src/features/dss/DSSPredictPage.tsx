@@ -1,6 +1,6 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { BrainCircuit, Play, BarChart3, Info, AlertTriangle } from 'lucide-react';
-import { dssService, type DssPrediction, type DssPredictInput } from '../../lib/apiClient';
+import { dssService, type DssPrediction, type DssPredictInput, type DssModelInfo } from '../../lib/apiClient';
 import { colors } from '../../styles/theme';
 
 // Human labels + bounds for the three numeric model inputs. Bounds mirror the
@@ -33,6 +33,16 @@ const DSSPredictPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState<DssPredictInput>({ rainfall: 1200, fertilizer_used: 50, soil_ph: 6.5, crop: 'maize' });
+  // Model quality metadata. `null` = not yet loaded, `{trained:false}` = the
+  // backend has no fitted model. The two are reported differently: a load that
+  // has not finished says nothing, an untrained model says so explicitly.
+  const [model, setModel] = useState<DssModelInfo | null>(null);
+
+  useEffect(() => {
+    dssService.getModel()
+      .then((res) => setModel(res.data))
+      .catch(() => setModel({ trained: false }));
+  }, []);
 
   const handlePredict = async () => {
     setLoading(true);
@@ -64,7 +74,7 @@ const DSSPredictPage = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '18px', alignItems: 'start' }}>
+      <div className="split-row-reverse">
         {/* Inputs */}
         <div style={card}>
           <h3 style={{ fontSize: '12px', fontWeight: 700, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '0.5px solid #eee', paddingBottom: '10px', marginBottom: '14px' }}>
@@ -118,7 +128,7 @@ const DSSPredictPage = () => {
                   {prediction.prediction} <span style={{ fontSize: '15px', fontWeight: 700, color: colors.textMuted }}>{prediction.unit}</span>
                 </p>
               </div>
-              <div style={{ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', borderTop: '0.5px solid #eee', paddingTop: '18px' }}>
+              <div className="grid-2" style={{ width: '100%', gap: '12px', borderTop: '0.5px solid #eee', paddingTop: '18px' }}>
                 <div style={tile}>
                   <p style={tileLabel}>Confidence</p>
                   <p style={tileValue}>{prediction.confidence}%</p>
@@ -155,6 +165,67 @@ const DSSPredictPage = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* MODEL QUALITY — a property of the model, not of any one prediction, so
+          it renders whether or not a forecast has been run.
+
+          The synthetic-data disclosure sits directly beneath the two numbers on
+          purpose. R² and MAE describe how well the forest fits its own held-out
+          test split; that split is drawn from generated data, not from this
+          farm. Placing the qualifier anywhere else on the page would let the
+          numbers be read as accuracy against real harvests. */}
+      <div style={card}>
+        <h3 style={{ fontSize: '12px', fontWeight: 700, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', borderBottom: '0.5px solid #eee', paddingBottom: '10px', marginBottom: '14px' }}>
+          <BarChart3 size={15} color={colors.primary} /> Model quality
+        </h3>
+
+        {model === null ? (
+          <p style={{ fontSize: '12px', color: colors.textMuted }}>Loading model details…</p>
+        ) : !model.trained || !model.metrics ? (
+          /* Untrained is stated, never rendered as blanks or zeros — a 0.0 R²
+             would read as a terrible model rather than as no model. */
+          <div>
+            <p style={{ fontSize: '12px', fontWeight: 600, color: colors.warn }}>The model has not been trained yet.</p>
+            <p style={{ fontSize: '11px', color: colors.textMuted, marginTop: '6px', lineHeight: 1.6 }}>
+              No accuracy figures exist until it has been fitted. Run a forecast to train it on first use, and these
+              figures will appear here.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="grid-2" style={{ gap: '12px' }}>
+              <div style={tile}>
+                <p style={tileLabel}>R² (coefficient of determination)</p>
+                <p style={tileValue}>{model.metrics.r2.toFixed(4)}</p>
+                <p style={{ fontSize: '10px', color: colors.textFaint, marginTop: '4px' }}>
+                  Share of yield variation the model explains. 1.0 is perfect.
+                </p>
+              </div>
+              <div style={tile}>
+                <p style={tileLabel}>MAE (mean absolute error)</p>
+                <p style={tileValue}>{model.metrics.mae.toFixed(4)} <span style={{ fontSize: '12px', fontWeight: 700, color: colors.textMuted }}>{model.target_unit ?? ''}</span></p>
+                <p style={{ fontSize: '10px', color: colors.textFaint, marginTop: '4px' }}>
+                  Average size of the model's error, in the target's own unit.
+                </p>
+              </div>
+            </div>
+
+            {/* The qualifier, immediately beside the numbers it qualifies. */}
+            <div style={{ marginTop: '14px', background: 'rgba(160,92,0,0.08)', border: `0.5px solid rgba(160,92,0,0.25)`, borderRadius: '8px', padding: '11px 13px' }}>
+              <p style={{ fontSize: '11px', color: colors.warn, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                What these figures measure
+              </p>
+              <p style={{ fontSize: '11.5px', color: colors.textBody, marginTop: '5px', lineHeight: 1.6 }}>
+                Both are measured against a held-out split of <strong>representative synthetic data</strong>, not against
+                this farm's records. The forecast model does not learn from your entries. They describe how well the model
+                reproduces the agronomic response surface it was generated from — not how accurately it predicts your
+                harvest.
+                {model.n_samples != null && ` Trained on ${model.n_samples.toLocaleString()} generated samples.`}
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
