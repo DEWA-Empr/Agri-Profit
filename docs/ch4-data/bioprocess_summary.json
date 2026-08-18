@@ -1,0 +1,16 @@
+{
+  "crops": [
+    {
+      "crop": "maize",
+      "drying_runs": 1,
+      "total_mass_in_kg": 100.0,
+      "total_marketable_mass_kg": 84.0,
+      "total_water_removed_kg": 14.08,
+      "mean_drying_rate_kg_h": 1.408,
+      "mean_newton_k_by_method": {
+        "SOLAR_DRYER": 0.08023464725249374
+      },
+      "safe_storage_share": 1.0
+    }
+  ]
+}

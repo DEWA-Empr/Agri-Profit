@@ -1,0 +1,54 @@
+{
+  "trained": true,
+  "features": [
+    "rainfall",
+    "fertilizer_used",
+    "soil_ph",
+    "crop"
+  ],
+  "numeric_features": [
+    "rainfall",
+    "fertilizer_used",
+    "soil_ph"
+  ],
+  "categorical_features": [
+    "crop"
+  ],
+  "crops": [
+    "maize",
+    "rice",
+    "sorghum",
+    "soybean",
+    "cassava"
+  ],
+  "target": "yield_t_ha",
+  "target_unit": "t/ha",
+  "bounds": {
+    "rainfall": [
+      300.0,
+      2000.0
+    ],
+    "fertilizer_used": [
+      0.0,
+      120.0
+    ],
+    "soil_ph": [
+      4.5,
+      8.5
+    ]
+  },
+  "model": "Pipeline(OneHotEncoder + RandomForestRegressor)",
+  "n_estimators": 200,
+  "n_samples": 6000,
+  "metrics": {
+    "r2": 0.9762,
+    "mae": 0.2414
+  },
+  "feature_importances": {
+    "crop": 0.3445,
+    "rainfall": 0.2845,
+    "fertilizer_used": 0.1231,
+    "soil_ph": 0.2479
+  },
+  "trained_at": "2026-07-01T19:03:34.593275+00:00"
+}
