@@ -20,11 +20,18 @@ const naira = (n: number): string => {
   return `${n < 0 ? '−' : ''}₦${body}`;
 };
 
-// What to say about unit cost, given the three states the backend distinguishes:
-// a real figure, no yield at all, or yields spanning more than one unit.
+// Unit costs are per-unit rates, not totals, so they keep their kobo: the
+// abbreviating `naira` above would round ₦41.67/kg to "₦42" and collapse the
+// gap between the two denominators, which is the whole point of showing both.
+const nairaExact = (n: number): string =>
+  `${n < 0 ? '−' : ''}₦${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// What to say about the HARVEST-unit cost, given the three states the backend
+// distinguishes: a real figure, no yield at all, or yields spanning more than
+// one unit.
 const unitCostLine = (c: DssCropMetrics, cost?: number | null): string => {
   if (cost != null && c.yield_quantity != null && c.yield_quantity > 0) {
-    return `Unit cost of production ${naira(cost)}/${c.yield_unit ?? 'unit'}`;
+    return `Unit cost ${nairaExact(cost)}/${c.yield_unit ?? 'unit'} harvested`;
   }
   if ((c.yield_by_unit?.length ?? 0) > 1) {
     return 'Unit cost — needs one harvest unit';
@@ -36,6 +43,10 @@ const CropRow = ({ c }: { c: DssCropMetrics }) => {
   // A profitable crop reads as an opportunity; a loss-making one as an alert.
   const a = c.gross_margin >= 0 ? accents.insight : accents.alert;
   const cost = c.unit_cost_of_production;
+  const marketableCost = c.unit_cost_per_kg_marketable;
+  // Mirrors the first branch of unitCostLine: true only when a real per-unit
+  // figure was rendered.
+  const hasHarvestCost = cost != null && c.yield_quantity != null && c.yield_quantity > 0;
   const byUnit = c.yield_by_unit ?? [];
   const mixedUnits = byUnit.length > 1;
   return (
@@ -51,6 +62,31 @@ const CropRow = ({ c }: { c: DssCropMetrics }) => {
         Revenue {naira(c.revenue)} · Cost {naira(c.expenses)}
         <br />
         {unitCostLine(c, cost)}
+        {/* The denominator is only named when there is a figure to name it for
+            — the other two states of unitCostLine say why there is no number,
+            and a dangling "wet mass at harvest" under them would qualify
+            nothing. */}
+        {hasHarvestCost && (
+          <>
+            <br />
+            <span style={{ color: colors.textFaint }}>wet mass as weighed at harvest</span>
+          </>
+        )}
+        {/* The SECOND unit cost, against Marketable Mass. It sits beside the
+            harvest-unit figure rather than replacing it: the two have different
+            denominators (what came off the field vs what came out of the dryer)
+            and the difference between them is the mass drying removed. Rendered
+            only where the crop has a recorded drying run — the backend returns
+            null otherwise, and a crop sold fresh has no marketable mass to
+            divide by. */}
+        {marketableCost != null && (
+          <>
+            <br />
+            Unit cost {nairaExact(marketableCost)}/kg marketable
+            <br />
+            <span style={{ color: colors.textFaint }}>dried mass out of the dryer</span>
+          </>
+        )}
         {/* Break-even is only rendered when the backend derived one. It is
             retrospective — the price comes from realised revenue — so the
             wording is past tense: what was needed, not what will be. */}

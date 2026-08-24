@@ -115,8 +115,16 @@ export interface DssCropMetrics {
   // Always the authoritative per-unit breakdown.
   yield_by_unit?: YieldByUnit[];
   // null when the crop has no recorded yield, and when units are mixed (a unit
-  // cost needs a single denominator).
+  // cost needs a single denominator). Denominated in the crop's HARVEST unit —
+  // wet mass as weighed in the field.
   unit_cost_of_production?: number | null;
+  // Marketable Mass (kg) summed across the crop's non-reversed drying runs, and
+  // the second unit cost denominated against it. Both null when the crop has no
+  // drying run; the per-kg cost is also null at zero marketable mass. These sit
+  // BESIDE unit_cost_of_production — neither replaces the other, and the two
+  // carry different denominators (harvest unit vs kg out of the dryer).
+  marketable_mass_kg?: number | null;
+  unit_cost_per_kg_marketable?: number | null;
   // Break-even yield at the price actually realised (revenue / yield_quantity).
   // RETROSPECTIVE: it says what was needed at the achieved price, not what will
   // be needed. null whenever no unit price can be derived — mixed units, no

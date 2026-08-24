@@ -134,7 +134,11 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
               ) : (
                 <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr><th style={th}>Crop</th><th style={thRight}>Yield</th><th style={thRight}>Unit cost</th><th style={thRight}>Gross margin</th></tr>
+                    {/* Two unit costs, each named by its denominator. A lender
+                        reading a bare "unit cost" cannot tell which mass it was
+                        divided by, and the two differ by everything drying
+                        removed. */}
+                    <tr><th style={th}>Crop</th><th style={thRight}>Yield</th><th style={thRight}>Unit cost<br />per harvested unit</th><th style={thRight}>Unit cost<br />per kg marketable</th><th style={thRight}>Gross margin</th></tr>
                   </thead>
                   <tbody>
                     {report.crops.map((c) => (
@@ -145,11 +149,35 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
                             separate quantities they are, never added up. */}
                         <td style={tdRight}>{formatYield(c)}</td>
                         <td style={tdRight}>{c.unit_cost_of_production != null ? naira(c.unit_cost_of_production) : '—'}</td>
+                        {/* Only where the crop actually has a recorded drying
+                            run. marketable_mass_kg is null for a crop sold
+                            fresh, and an em dash is the honest answer there —
+                            not a figure borrowed from the harvest denominator. */}
+                        <td style={tdRight}>
+                          {c.marketable_mass_kg != null && c.unit_cost_per_kg_marketable != null
+                            ? naira(c.unit_cost_per_kg_marketable)
+                            : '—'}
+                        </td>
                         <td style={{ ...tdRight, fontWeight: 600, color: c.gross_margin >= 0 ? colors.primaryDark : colors.danger }}>{naira(c.gross_margin)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table></div>
+              )}
+              {/* The assumption behind the marketable figure, stated wherever
+                  the figure appears. It divides a crop's TOTAL expenses by the
+                  marketable mass of its dried lots, so where only part of a
+                  harvest was dried it overstates unit cost (docs/adr/0001,
+                  "Known boundary"). The farm owner knows which of their
+                  harvests went through the dryer; a third party reading this
+                  link cannot tell, and cannot detect the overstatement from
+                  the numbers on the page. So it is said out loud. */}
+              {report.crops.some((c) => c.marketable_mass_kg != null && c.unit_cost_per_kg_marketable != null) && (
+                <p style={{ fontSize: '10px', color: colors.textMuted, padding: '12px 16px', borderTop: `0.5px solid ${colors.dividerLight}`, lineHeight: 1.6 }}>
+                  Cost per kg marketable divides the crop’s total recorded cost by the mass leaving its
+                  drying runs. It assumes the whole harvest was dried. Where only part of a harvest went
+                  through the dryer, this figure overstates the true unit cost.
+                </p>
               )}
             </div>
 
