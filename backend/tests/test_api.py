@@ -1,4 +1,5 @@
 import base64
+from datetime import timedelta
 
 import pytest
 
@@ -1574,6 +1575,112 @@ def test_enterprise_reversal_excluded_from_buckets_and_does_not_lower_coverage(c
     assert be["classification_coverage_pct"] == pytest.approx(90.9091, rel=1e-4)
 
 
+# --- Amendment 1: the operating expense ratio, on the cost structure -------
+# It is a whole-enterprise CASH measure — naira over naira — and NOT a figure
+# per marketable kilogram, so it rides on /dss/cost-structure and deliberately
+# not on /dss/break-even-price.
+
+def _seed_input_only_sorghum(client):
+    """Seed sorghum: 1,600 of recorded input cost and no sale at all. The
+    realistic loss case, and the one that exercises the null ratio."""
+    assert _post_crop_log(
+        client, activity_type="seed", crop="sorghum", amount=1000.0,
+        transaction_type="debit",
+    ).status_code == 201
+    assert _post_mech_cost(client, crop="sorghum", amount=600.0, subtype="FUEL").status_code == 201
+
+
+def test_enterprise_operating_expense_ratio_is_reported_on_cost_structure(client):
+    # Fixture E through the ledger. Maize cash operating cost is 4,400 —
+    # variable 3,500 + semi-variable 500 + UNCLASSIFIED 400 — against revenue
+    # 45,000, so 9.7778%. Farm-wide adds sorghum's 1,600 for 6,000/45,000 =
+    # 13.3333%, exactly the two figures the unit fixture asserts.
+    _seed_fixture_a(client)
+    _seed_input_only_sorghum(client)
+    assert _post_crop_log(
+        client, activity_type="yield", crop="maize", amount=45000.0,
+        transaction_type="credit", quantity=12.0, unit="bags",
+    ).status_code == 201
+
+    body = client.get("/api/v1/dss/cost-structure").json()
+    maize = next(c for c in body["crops"] if c["crop"] == "maize")
+
+    assert maize["revenue_ngn"] == pytest.approx(45000.0)
+    assert maize["cash_operating_cost_ngn"] == pytest.approx(4400.0)
+    assert maize["operating_expense_ratio_pct"] == pytest.approx(9.7778, rel=1e-4)
+
+    assert body["farm"]["revenue_ngn"] == pytest.approx(45000.0)
+    assert body["farm"]["cash_operating_cost_ngn"] == pytest.approx(6000.0)
+    assert body["farm"]["operating_expense_ratio_pct"] == pytest.approx(13.3333, rel=1e-4)
+
+
+def test_enterprise_operating_expense_ratio_is_null_for_an_input_only_crop(client):
+    """Seed sorghum: cost recorded, nothing sold. The ratio is UNDEFINED — not
+    zero (which reads as "spent nothing") and not a large number (which would
+    need a denominator that does not exist). The farm-wide ratio is still
+    defined, because maize did sell, so a null crop ratio is visibly a property
+    of that crop and not of the report."""
+    _seed_fixture_a(client)
+    _seed_input_only_sorghum(client)
+    assert _post_crop_log(
+        client, activity_type="yield", crop="maize", amount=45000.0,
+        transaction_type="credit", quantity=12.0, unit="bags",
+    ).status_code == 201
+
+    body = client.get("/api/v1/dss/cost-structure").json()
+    sorghum = next(c for c in body["crops"] if c["crop"] == "sorghum")
+
+    assert sorghum["revenue_ngn"] == pytest.approx(0.0)
+    # The cost is known and reported; only the ratio is undefined.
+    assert sorghum["cash_operating_cost_ngn"] == pytest.approx(1600.0)
+    assert sorghum["total_recorded_cost"] == pytest.approx(1600.0)
+    assert sorghum["operating_expense_ratio_pct"] is None
+    assert body["farm"]["operating_expense_ratio_pct"] is not None
+
+
+def test_enterprise_operating_expense_ratio_excludes_recorded_depreciation(client):
+    """THE TRAP: the ratio is a CASH measure. A recorded DEPRECIATION row is a
+    real ledger entry and a real fixed cost, but it is not cash, so it raises
+    total_recorded_cost and must leave the ratio exactly where it was."""
+    _seed_fixture_a(client)
+    assert _post_crop_log(
+        client, activity_type="yield", crop="maize", amount=45000.0,
+        transaction_type="credit", quantity=12.0, unit="bags",
+    ).status_code == 201
+    before = next(
+        c for c in client.get("/api/v1/dss/cost-structure").json()["crops"]
+        if c["crop"] == "maize"
+    )["operating_expense_ratio_pct"]
+
+    assert _post_mech_cost(
+        client, crop="maize", amount=2000.0, subtype="DEPRECIATION"
+    ).status_code == 201
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/cost-structure").json()["crops"]
+        if c["crop"] == "maize"
+    )
+    assert maize["fixed_cost_recorded"] == pytest.approx(2000.0)
+    assert maize["total_recorded_cost"] == pytest.approx(6400.0)   # it IS recorded
+    assert maize["cash_operating_cost_ngn"] == pytest.approx(4400.0)  # but not cash
+    assert maize["operating_expense_ratio_pct"] == pytest.approx(before, rel=1e-9)
+    assert maize["operating_expense_ratio_pct"] == pytest.approx(9.7778, rel=1e-4)
+    # Explicitly NOT total_recorded_cost / revenue, which would be this.
+    assert maize["operating_expense_ratio_pct"] != pytest.approx(14.2222, rel=1e-4)
+
+
+def test_enterprise_operating_expense_ratio_is_not_on_the_break_even_response(client):
+    """It belongs to the cost structure, not beside the two per-kilogram prices.
+    Placed there it would be read as a third break-even figure, which is exactly
+    the naming failure the three metrics are kept apart to avoid."""
+    _seed_fixture_a(client)
+    assert _post_drying(client, crop="maize", amount=0.0).status_code == 201
+
+    be = client.get("/api/v1/dss/break-even-price?crop=maize").json()
+    assert "operating_expense_ratio_pct" not in be
+    assert "operating_expense_ratio_pct" not in be["crops"][0]
+
+
 def test_enterprise_break_even_prices_null_without_marketable_mass(client):
     # Fixture H: a crop with recorded cost but no drying run has no marketable
     # mass, and a price per marketable kilogram is undefined — never a
@@ -1635,6 +1742,146 @@ def test_enterprise_sensitivity_matrix_is_labelled_conditional(client):
     # Caller-supplied percentages are honoured.
     custom = client.get("/api/v1/dss/sensitivity?crop=maize&percentages=50&percentages=200").json()
     assert [r["percentage"] for r in custom["crops"][0]["rows"]] == [50, 200]
+
+
+# --- Amendment 2: the depreciation window, derived by default and pinnable --
+# A derived span WIDENS with every new log, so a break-even price to cover total
+# cost computed over one cannot be re-derived after the next entry. period_days
+# pins the window; period_source says which the reader is looking at.
+
+def _seed_rated_equipment(client):
+    """One rated asset: 240,000 at 0.10/yr, so 24,000 a year of charge.
+
+    The rate is a FRACTION here, matching Fixture B; models.py:132 calls the
+    column an annual percentage and enterprise_service multiplies by it
+    directly, so the two readings disagree. Not this amendment's to settle —
+    the tests below assert only that a pinned window and a derived one give the
+    charge the same treatment, which holds under either reading."""
+    resp = client.post(
+        "/api/v1/equipment/",
+        json={"name": "Bench dryer", "purchase_price": 240000.0, "depreciation_rate": 0.10},
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+def test_enterprise_period_defaults_to_the_derived_ledger_span(client):
+    _seed_fixture_a(client)
+    _seed_rated_equipment(client)
+
+    body = client.get("/api/v1/dss/break-even-price?crop=maize").json()
+    assert body["period_source"] == "derived"
+    # Every log in this test was written in one request cycle, so the span is
+    # one day — inclusive of both endpoints, never a zero-length window.
+    assert body["period_days"] == pytest.approx(1.0)
+    assert body["period_fixed_cost_ngn"] == pytest.approx(24000.0 / 365.0, rel=1e-4)
+
+
+def test_enterprise_specified_period_overrides_the_derived_span(client):
+    _seed_fixture_a(client)
+    _seed_rated_equipment(client)
+    assert _post_drying(client, crop="maize", amount=0.0).status_code == 201  # 84.0 kg
+
+    derived = client.get("/api/v1/dss/break-even-price?crop=maize").json()
+    pinned = client.get("/api/v1/dss/break-even-price?crop=maize&period_days=30").json()
+
+    assert pinned["period_source"] == "specified"
+    assert pinned["period_days"] == pytest.approx(30.0)
+    # Fixture B's 30-day charge, and maize is the only crop bearing direct cost
+    # so its share of the allocation is the whole of it.
+    assert pinned["period_fixed_cost_ngn"] == pytest.approx(1972.60, rel=1e-4)
+
+    maize = pinned["crops"][0]
+    assert maize["allocated_fixed_ngn"] == pytest.approx(1972.60, rel=1e-4)
+    assert maize["total_cost_ngn"] == pytest.approx(4400.0 + 1972.60, rel=1e-4)
+    assert maize["break_even_price_total_ngn_per_kg"] == pytest.approx(
+        (4400.0 + 1972.60) / 84.0, rel=1e-4
+    )
+
+    # The window moves the TOTAL price and must not touch the CASH one: the
+    # overlay is not cash and has no route into that base.
+    assert maize["break_even_price_cash_ngn_per_kg"] == pytest.approx(
+        derived["crops"][0]["break_even_price_cash_ngn_per_kg"], rel=1e-9
+    )
+    assert maize["break_even_price_total_ngn_per_kg"] != pytest.approx(
+        derived["crops"][0]["break_even_price_total_ngn_per_kg"], rel=1e-6
+    )
+
+
+def test_enterprise_pinned_period_is_reproducible_when_a_new_log_widens_the_span(client, db):
+    """THE REASON THE OVERRIDE EXISTS. A derived span runs first log to last, so
+    entering ANY further log widens it, scales the depreciation charge, and
+    silently moves a break-even price to cover total cost that was already
+    reported. A figure quoted last week could not be re-derived, because the
+    window it was computed over no longer exists. A pinned window is stable
+    across the same edit."""
+    from backend.app.models import models as m
+
+    _seed_fixture_a(client)
+    _seed_rated_equipment(client)
+    assert _post_drying(client, crop="maize", amount=0.0).status_code == 201
+
+    def total_price(query=""):
+        body = client.get("/api/v1/dss/break-even-price?crop=maize" + query).json()
+        return body["period_days"], body["crops"][0]["break_even_price_total_ngn_per_kg"]
+
+    derived_days_before, derived_before = total_price()
+    pinned_days_before, pinned_before = total_price("&period_days=30")
+
+    # Backdate the farm's earliest log by 100 days — the shape of "a record was
+    # entered that the reported figure did not cover". The span widens from one
+    # day to 101.
+    earliest = db.query(m.OperationalLog).order_by(m.OperationalLog.id).first()
+    earliest.timestamp = earliest.timestamp - timedelta(days=100)
+    db.commit()
+
+    derived_days_after, derived_after = total_price()
+    pinned_days_after, pinned_after = total_price("&period_days=30")
+
+    # The derived window moved, and so did the price computed over it.
+    assert derived_days_after == pytest.approx(101.0)
+    assert derived_days_after != pytest.approx(derived_days_before)
+    assert derived_after != pytest.approx(derived_before, rel=1e-6)
+
+    # The pinned window did not, and neither did its price. Same query, same
+    # number, after a ledger edit — which is the whole claim.
+    assert pinned_days_after == pytest.approx(pinned_days_before) == pytest.approx(30.0)
+    assert pinned_after == pytest.approx(pinned_before, rel=1e-9)
+
+
+def test_enterprise_sensitivity_honours_the_pinned_period(client):
+    # Every price in the matrix is a break-even price, so the matrix inherits
+    # the same reproducibility problem and the same fix. The 100% row must be
+    # the number /break-even-price reports for the same pin.
+    _seed_fixture_a(client)
+    _seed_rated_equipment(client)
+    assert _post_drying(client, crop="maize", amount=0.0).status_code == 201
+
+    matrix = client.get("/api/v1/dss/sensitivity?crop=maize&period_days=30").json()
+    assert matrix["period_source"] == "specified"
+    assert matrix["period_days"] == pytest.approx(30.0)
+
+    at_100 = next(r for r in matrix["crops"][0]["rows"] if r["percentage"] == 100)
+    be = client.get("/api/v1/dss/break-even-price?crop=maize&period_days=30").json()
+    assert at_100["break_even_price_total_ngn_per_kg"] == pytest.approx(
+        be["crops"][0]["break_even_price_total_ngn_per_kg"], rel=1e-9
+    )
+    # Unpinned, the same route says so rather than leaving the reader to guess.
+    assert client.get(
+        "/api/v1/dss/sensitivity?crop=maize"
+    ).json()["period_source"] == "derived"
+
+
+@pytest.mark.parametrize("route", ["break-even-price", "sensitivity"])
+@pytest.mark.parametrize("bad", [0, -1, 36526])
+def test_enterprise_period_days_is_bounded_at_the_edge(client, route, bad):
+    # A zero window would zero the overlay, a negative one would make the charge
+    # negative and drop the total price BELOW the cash price, and an unbounded
+    # one would let a single request scale the charge arbitrarily far above any
+    # cost it is set beside. All three are 422 at the edge, never a 500.
+    _seed_fixture_a(client)
+    resp = client.get("/api/v1/dss/{}?period_days={}".format(route, bad))
+    assert resp.status_code == 422
 
 
 def test_enterprise_partial_budget_returns_a_negative_net_change(client):
@@ -1733,6 +1980,99 @@ def test_enterprise_yield_baseline_mixed_units_is_null_with_a_reason(client):
     assert maize["grand_average_kg"] is None      # not 112 across two units
     assert maize["unit"] is None
     assert "more than one unit" in maize["reason"]
+
+
+# --- Amendment 3: a null Olympic average never stands without its count -----
+# A season is a calendar year of recorded yield — ADR-0002 records that as a
+# temporary assumption pending a Season entity. n_seasons is therefore reported
+# in every branch, including the ones that refuse to give an average.
+
+def _backdate_yields_across_years(db, crop, years):
+    """Move a crop's yield logs into distinct calendar years, oldest first.
+
+    The API cannot set a timestamp — it is server-stamped — so multi-season
+    history is only reachable through the session. `years` is a per-log offset
+    in whole years, applied in log-id order.
+    """
+    from backend.app.models import models as m
+
+    logs = (
+        db.query(m.OperationalLog)
+        .filter(m.OperationalLog.crop == crop, m.OperationalLog.activity_type == "yield")
+        .order_by(m.OperationalLog.id)
+        .all()
+    )
+    assert len(logs) == len(years)
+    for log, back in zip(logs, years):
+        log.timestamp = log.timestamp - timedelta(days=365 * back)
+    db.commit()
+
+
+def test_enterprise_yield_baseline_mixed_units_still_reports_its_season_count(client, db):
+    """A null with no count beside it is unreadable: the reader cannot tell "no
+    history yet" from "three seasons of history that cannot be summed". The
+    units are inconsistent, so no average is given — but the seasons were found,
+    and saying zero would be a different and false statement."""
+    for unit, quantity in (("bags", 12.0), ("bags", 14.0), ("kg", 900.0)):
+        assert _post_crop_log(
+            client, activity_type="yield", crop="maize", amount=1000.0,
+            transaction_type="credit", quantity=quantity, unit=unit,
+        ).status_code == 201
+    _backdate_yields_across_years(db, "maize", [2, 1, 0])
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/yield-baseline").json()["crops"]
+        if c["crop"] == "maize"
+    )
+    assert maize["olympic_average_kg"] is None
+    assert maize["grand_average_kg"] is None
+    assert maize["n_seasons"] == 3          # not 0: the history exists
+    assert "more than one unit" in maize["reason"]
+    assert "3 season" in maize["reason"]
+
+
+def test_enterprise_yield_baseline_season_count_distinguishes_two_kinds_of_null(client, db):
+    """Two seasons and three seasons give different answers for the same reason
+    field to explain, and the count is what tells them apart."""
+    for quantity in (10.0, 20.0):
+        assert _post_crop_log(
+            client, activity_type="yield", crop="maize", amount=1000.0,
+            transaction_type="credit", quantity=quantity, unit="bags",
+        ).status_code == 201
+    _backdate_yields_across_years(db, "maize", [1, 0])
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/yield-baseline").json()["crops"]
+        if c["crop"] == "maize"
+    )
+    assert maize["n_seasons"] == 2
+    assert maize["olympic_average_kg"] is None      # two is below the minimum
+    assert "2" in maize["reason"]
+    # The grand average is still given, so the two baselines stay comparable.
+    assert maize["grand_average_kg"] == pytest.approx(15.0)
+
+
+def test_enterprise_yield_baseline_three_seasons_discards_one_high_and_one_low(client, db):
+    # A calendar year is one season even where several yields were logged in it,
+    # so the four logs below are three seasons: 10, 20+5, 30.
+    for quantity in (10.0, 20.0, 5.0, 30.0):
+        assert _post_crop_log(
+            client, activity_type="yield", crop="maize", amount=1000.0,
+            transaction_type="credit", quantity=quantity, unit="bags",
+        ).status_code == 201
+    _backdate_yields_across_years(db, "maize", [2, 1, 1, 0])
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/yield-baseline").json()["crops"]
+        if c["crop"] == "maize"
+    )
+    assert maize["n_seasons"] == 3
+    assert maize["n_used"] == 1
+    assert maize["n_discarded"] == 2
+    # Seasons are 10, 25, 30. Drop one high and one low, leaving 25.
+    assert maize["olympic_average_kg"] == pytest.approx(25.0)
+    assert maize["grand_average_kg"] == pytest.approx(65.0 / 3.0, rel=1e-4)
+    assert maize["reason"] is None
 
 
 def test_enterprise_yield_baseline_reports_a_crop_with_no_yield(client):

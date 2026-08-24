@@ -104,6 +104,18 @@ _Avoid_: Break-even, full cost price, TC breakeven
 A crop's share of the farm's periodic fixed cost, derived at report time from Equipment Depreciation and apportioned in proportion to that crop's recorded direct cost. Never a Financial Transaction.
 _Avoid_: Overhead, fixed cost, indirect cost
 
+**Operating Expense Ratio**:
+Cash operating cost as a percentage of revenue, for a crop or for the farm. The numerator is Variable, Semi-variable and Unclassified recorded cost — everything actually spent in cash — and it excludes both recorded Depreciation and Allocated Fixed Cost, so the figure stays comparable to a published benchmark. Undefined where there is no revenue for the cost to be a proportion of. A whole-enterprise measure in naira over naira, never a figure per kilogram.
+_Avoid_: Cost ratio, expense ratio, opex ratio, burn rate
+
+**Reporting Period**:
+The window of days a derived periodic figure is computed over, principally the Equipment Depreciation charge behind Allocated Fixed Cost. It is derived by default from the span of the farm's own ledger, and may instead be specified by the reader; which of the two was used travels with every figure drawn from it. A derived window widens as records accumulate, so a figure computed over one is reproducible only while the window is stated.
+_Avoid_: Period, date range, timeframe
+
+**Season**:
+One production cycle of a crop, currently taken to be one calendar year of recorded yield: several yield records in the same year are one Season, summed. This is an assumption the data model forces rather than a measurement, recorded as a temporary one in ADR-0002 pending a Season entity. Season counts are reported alongside every yield baseline, including the baselines that are undefined.
+_Avoid_: Year, cycle, harvest, planting
+
 **Partial Budget**:
 An appraisal of a single proposed change, computed as (additional revenue + reduced cost) − (lost revenue + additional cost). It evaluates only the quantities the change affects, so it needs no complete enterprise budget.
 _Avoid_: ROI, cost-benefit analysis, business case

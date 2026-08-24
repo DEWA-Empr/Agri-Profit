@@ -333,12 +333,11 @@ def _cost_subtype(log) -> Optional[str]:
 def _enterprise_base(rows) -> dict:
     """Project the farm's surviving rows into per-crop economics inputs.
 
-    Returns cost entry tuples, marketable mass and yield observations per crop.
-    Costs are DEBIT transactions; credits are revenue and are not cost entries.
-
-    No revenue total is accumulated here: none of the five routes needs one.
-    The operating expense ratio (enterprise_service.operating_expense_ratio_pct)
-    does, but it has no route in this phase — see the ticket, section 5.
+    Returns cost entry tuples, revenue, marketable mass and yield observations
+    per crop. Costs are DEBIT transactions; credits are revenue and are not cost
+    entries. The two are accumulated in the same pass but never into the same
+    pile: revenue is the DENOMINATOR of the operating expense ratio and belongs
+    nowhere near the classification denominator.
     """
     per_crop: dict[str, dict] = {}
 
@@ -346,7 +345,12 @@ def _enterprise_base(rows) -> dict:
         crop = log.crop or UNSPECIFIED
         b = per_crop.setdefault(
             crop,
-            {"cost_entries": [], "marketable_mass_kg": None, "yields": []},
+            {
+                "cost_entries": [],
+                "revenue_ngn": 0.0,
+                "marketable_mass_kg": None,
+                "yields": [],
+            },
         )
         amount = float(tx.amount or 0.0)
 
@@ -357,6 +361,8 @@ def _enterprise_base(rows) -> dict:
             b["cost_entries"].append(
                 (amount, log.activity_type.value, _cost_subtype(log))
             )
+        else:
+            b["revenue_ngn"] += amount
 
         if log.activity_type == Category.BIOPROCESS and log.extra_data:
             mass_out = log.extra_data.get("mass_out_kg")
@@ -384,52 +390,137 @@ def _select_crops(per_crop: dict, crop: Optional[str]) -> list[str]:
     return [crop]
 
 
+def _with_operating_expense_ratio(structure: dict, revenue_ngn: float) -> dict:
+    """A cost structure plus the operating expense ratio drawn from it.
+
+    The ratio belongs HERE rather than on the break-even response because it is
+    a whole-enterprise CASH measure — cash operating cost against revenue, both
+    in naira — and not a figure per marketable kilogram. Putting it beside the
+    two per-kg prices would invite it to be read as a third one.
+
+    The numerator is cash operating cost: classified variable and semi-variable
+    cost PLUS unclassified recorded cost. Unclassified cost was in fact spent,
+    so it belongs in a cash measure; excluding it would understate the ratio in
+    exact proportion to how poor the classification is. Recorded DEPRECIATION
+    rows (`fixed_cost_recorded`) are excluded because they are not cash, and the
+    allocated fixed overlay never reaches this function at all — it lives on the
+    break-even path and has no parameter here.
+
+    Both the numerator and the revenue that divides it are returned beside the
+    ratio, in the same way marketable mass is reported beside the rate that
+    divides by it: a rate whose divisor is invisible cannot be checked.
+    """
+    cash_operating = structure["cash_cost"] + structure["unclassified_cost"]
+    return {
+        **structure,
+        "revenue_ngn": revenue_ngn,
+        "cash_operating_cost_ngn": cash_operating,
+        "operating_expense_ratio_pct": enterprise_service.operating_expense_ratio_pct(
+            cash_operating_cost_ngn=cash_operating,
+            revenue_ngn=revenue_ngn,
+        ),
+    }
+
+
 def get_cost_structure(db: Session, farm_id: int, crop: Optional[str] = None) -> dict:
-    """Section 4.1 per crop and farm-wide, with classification coverage.
+    """Section 4.1 per crop and farm-wide, with classification coverage and the
+    operating expense ratio (section 4.6).
 
     The farm-wide summary is computed over every crop's entries regardless of
     the `crop` filter — it is the farm's cost structure, not the filtered
     subset's, and re-deriving it from a filtered list would silently answer a
-    different question.
+    different question. The same holds for the farm's revenue and therefore for
+    the farm's ratio.
+
+    A crop with cost and no sale — seed sorghum, an input-only season — has zero
+    revenue and therefore a NULL ratio, not an infinite or a zero one. That is
+    the honest reading: there is no revenue for the cost to be a proportion of.
     """
     per_crop = _enterprise_base(_live_rows(db, farm_id))
     keys = _select_crops(per_crop, crop)
 
     crops = [
-        {"crop": key, **enterprise_service.cost_structure(per_crop[key]["cost_entries"])}
+        {
+            "crop": key,
+            **_with_operating_expense_ratio(
+                enterprise_service.cost_structure(per_crop[key]["cost_entries"]),
+                per_crop[key]["revenue_ngn"],
+            ),
+        }
         for key in keys
     ]
     farm_entries = [e for b in per_crop.values() for e in b["cost_entries"]]
-    return {"crops": crops, "farm": enterprise_service.cost_structure(farm_entries)}
+    farm_revenue = sum(b["revenue_ngn"] for b in per_crop.values())
+    return {
+        "crops": crops,
+        "farm": _with_operating_expense_ratio(
+            enterprise_service.cost_structure(farm_entries), farm_revenue
+        ),
+    }
 
 
-def _equipment_overlay(db: Session, farm_id: int, rows) -> dict:
-    """The farm's depreciation overlay over the span its ledger actually covers.
+DERIVED = "derived"
+SPECIFIED = "specified"
 
-    The period is derived from the ledger rather than asked for: it runs from
-    the first surviving log to the last, inclusive, so the charge lines up with
-    the costs it is being compared against. It is reported in the response
-    (`period_days`) rather than buried, because a reader who cannot see the
-    window cannot judge the charge.
+
+def _equipment_overlay(
+    db: Session,
+    farm_id: int,
+    rows,
+    period_days: Optional[float] = None,
+) -> dict:
+    """The farm's depreciation overlay, over a stated period or the ledger's own.
+
+    THE DEFAULT IS DERIVED. With no `period_days` the window runs from the first
+    surviving log to the last, inclusive, so the charge lines up with the costs
+    it is being compared against. The window is reported (`period_days`) rather
+    than buried, because a reader who cannot see it cannot judge the charge.
+
+    WHY AN OVERRIDE EXISTS. A derived span WIDENS every time a new log is
+    entered. The depreciation charge is proportional to that span, the allocated
+    fixed cost is drawn from the charge, and the break-even price to cover total
+    cost is drawn from the allocation — so entering an unrelated log silently
+    changes a break-even price that was already reported, quoted or written
+    down. The figure would be irreproducible: nobody could re-derive a number
+    they read last week, because the window it was computed over no longer
+    exists. Passing `period_days` pins the window, and `period_source` says
+    which of the two the reader is looking at, so a pinned figure is never
+    mistaken for a live one or the reverse.
+
+    An explicit period is used as given and is NOT clamped to the ledger span. A
+    period longer than the records is a legitimate question — what does a full
+    season of machine wear cost against the part-season I have logged — and
+    silently shrinking it back would answer a different one.
     """
     equipment = (
         db.query(models.Equipment).filter(models.Equipment.farm_id == farm_id).all()
     )
-    stamps = [log.timestamp for log, _ in rows if log.timestamp is not None]
-    # Inclusive of both endpoints, so a single day of records is one day and not
-    # zero — a zero-length period would zero the overlay for a real farm.
-    period_days = ((max(stamps) - min(stamps)).days + 1) if stamps else 0.0
 
-    return enterprise_service.depreciation_overlay(
+    if period_days is None:
+        stamps = [log.timestamp for log, _ in rows if log.timestamp is not None]
+        # Inclusive of both endpoints, so a single day of records is one day and
+        # not zero — a zero-length period would zero the overlay for a real farm.
+        period_days = ((max(stamps) - min(stamps)).days + 1) if stamps else 0.0
+        source = DERIVED
+    else:
+        source = SPECIFIED
+
+    overlay = enterprise_service.depreciation_overlay(
         equipment=[
             {"purchase_value_ngn": e.purchase_price, "depreciation_rate": e.depreciation_rate}
             for e in equipment
         ],
         period_days=period_days,
     )
+    return {**overlay, "period_source": source}
 
 
-def get_break_even_price(db: Session, farm_id: int, crop: Optional[str] = None) -> dict:
+def get_break_even_price(
+    db: Session,
+    farm_id: int,
+    crop: Optional[str] = None,
+    period_days: Optional[float] = None,
+) -> dict:
     """Section 4.4: both conditional break-even prices, the four cost lines,
     coverage, and the count of unrated equipment.
 
@@ -437,13 +528,20 @@ def get_break_even_price(db: Session, farm_id: int, crop: Optional[str] = None) 
     applied. A crop's share of fixed cost is its share of the whole farm's
     direct cost; deriving it from the filtered subset would give a single
     filtered crop a share of 1.0 and hand it the entire overlay.
+
+    `period_days` overrides the ledger-derived depreciation window, and
+    `period_source` in the response says which was used. The default stays
+    derived; the override exists because a derived span widens with every new
+    log, which silently moves the break-even price to cover total cost and makes
+    a previously reported figure impossible to re-derive. See
+    `_equipment_overlay` for the full statement of the problem.
     """
     # ONE pass over the ledger, shared by the projection and the overlay window.
     rows = _live_rows(db, farm_id)
     per_crop = _enterprise_base(rows)
     keys = _select_crops(per_crop, crop)
 
-    overlay = _equipment_overlay(db, farm_id, rows)
+    overlay = _equipment_overlay(db, farm_id, rows, period_days)
     structures = {
         key: enterprise_service.cost_structure(b["cost_entries"])
         for key, b in per_crop.items()
@@ -472,6 +570,10 @@ def get_break_even_price(db: Session, farm_id: int, crop: Optional[str] = None) 
     return {
         "crops": crops,
         "period_days": overlay["period_days"],
+        # Which window the figures above were computed over. A reader comparing
+        # two reports needs this to know whether a moved price means the farm
+        # changed or only the window did.
+        "period_source": overlay["period_source"],
         "period_fixed_cost_ngn": overlay["period_charge_ngn"],
         "equipment_count": overlay["equipment_count"],
         "equipment_unrated_count": overlay["equipment_unrated_count"],
@@ -484,13 +586,18 @@ def get_sensitivity(
     farm_id: int,
     crop: Optional[str] = None,
     percentages: Optional[Sequence[int]] = None,
+    period_days: Optional[float] = None,
 ) -> dict:
     """Section 4.5: the conditional yield sensitivity matrix, per crop.
 
     Built on the same cost bases as get_break_even_price, so a row at 100% is
-    the same pair of numbers that endpoint reports.
+    the same pair of numbers that endpoint reports — which is why `period_days`
+    is accepted and `period_source` echoed here too. Every price in this matrix
+    is a break-even price, so it inherits the reproducibility problem the
+    override exists to solve; pinning the window on one route and not the other
+    would leave the matrix drifting under a pinned headline figure.
     """
-    base = get_break_even_price(db, farm_id, crop)
+    base = get_break_even_price(db, farm_id, crop, period_days)
     pct = percentages or enterprise_service.DEFAULT_SENSITIVITY_PCT
 
     crops = []
@@ -504,7 +611,11 @@ def get_sensitivity(
                 percentages=pct,
             ),
         })
-    return {"crops": crops}
+    return {
+        "crops": crops,
+        "period_days": base["period_days"],
+        "period_source": base["period_source"],
+    }
 
 
 def get_yield_baseline(db: Session, farm_id: int, crop: Optional[str] = None) -> dict:
@@ -513,11 +624,20 @@ def get_yield_baseline(db: Session, farm_id: int, crop: Optional[str] = None) ->
     A SEASON IS A CALENDAR YEAR of recorded yield, and that is an assumption,
     not a measurement: the model has no season entity, so the year a yield was
     logged in is the only grouping available. Several yield logs in one year are
-    one season, summed.
+    one season, summed. ADR-0002 records this as a TEMPORARY domain assumption,
+    pending a Season entity, in the same terms as proportional fixed-cost
+    allocation.
 
     Mixed units within a crop return nulls with a reason rather than a total —
     the same verdict get_decision_support gives, for the same cause: quantities
     in different units cannot be summed, and no honest single baseline exists.
+
+    EVERY BRANCH REPORTS `n_seasons`, including the ones that return no average
+    at all. A null Olympic average is a different claim at one season than at
+    ten — the first says "not enough history yet", the second says "the units
+    are inconsistent" or "this needs looking at" — and a null standing bare
+    cannot be told apart. The count is the reader's only way to distinguish them,
+    so it is computed even where the averages are refused.
     """
     per_crop = _enterprise_base(_live_rows(db, farm_id))
     keys = _select_crops(per_crop, crop)
@@ -526,6 +646,10 @@ def get_yield_baseline(db: Session, farm_id: int, crop: Optional[str] = None) ->
     for key in keys:
         observations = per_crop[key]["yields"]
         units = {(u or "").strip().lower() or None for _, _, u in observations}
+        # Counted before any refusal, so the count survives one. Distinct
+        # calendar years, not distinct logs: three logs in one year are one
+        # season, and n_seasons must say one.
+        n_seasons = len({stamp.year for stamp, _, _ in observations})
 
         if not observations:
             crops.append({
@@ -538,10 +662,14 @@ def get_yield_baseline(db: Session, farm_id: int, crop: Optional[str] = None) ->
         if len(units) > 1:
             crops.append({
                 "crop": key, "olympic_average_kg": None, "grand_average_kg": None,
-                "n_seasons": 0, "n_used": 0, "n_discarded": 0, "unit": None,
+                # Reported even though no average is: the seasons were found,
+                # they simply cannot be summed. Zero here would claim the crop
+                # has no history, which is a different and false statement.
+                "n_seasons": n_seasons, "n_used": 0, "n_discarded": 0, "unit": None,
                 "reason": (
                     "This crop's yields are recorded in more than one unit, so no "
-                    "single baseline exists. See the per-unit breakdown instead."
+                    "single baseline exists across {} season(s). See the per-unit "
+                    "breakdown instead.".format(n_seasons)
                 ),
             })
             continue

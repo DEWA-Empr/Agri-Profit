@@ -418,6 +418,24 @@ class CostStructure(BaseModel):
     # None when total_recorded_cost is 0 — not 100, not 0. There is no coverage
     # of nothing, and a vacuous 100 would read as "fully classified".
     classification_coverage_pct: Optional[float] = None
+    # --- Section 4.6, the operating expense ratio ---------------------------
+    # It lives on the cost structure and NOT on the break-even response because
+    # it is a whole-enterprise cash measure in naira-over-naira, not a figure
+    # per marketable kilogram. Beside the two per-kg prices it would read as a
+    # third one.
+    #
+    # Revenue and the cash operating cost that divides into it are both carried
+    # here, so the rate can be checked against its own divisor rather than
+    # taken on trust.
+    revenue_ngn: float
+    # Variable + semi-variable + UNCLASSIFIED recorded cost. Unclassified cost
+    # was really spent, so a cash measure includes it. Recorded DEPRECIATION
+    # rows are excluded (not cash) and the allocated fixed overlay never reaches
+    # this figure at all — it belongs to the break-even path.
+    cash_operating_cost_ngn: float
+    # None at zero revenue — an input-only crop such as seed sorghum has no
+    # revenue for its cost to be a proportion of. Not infinite, not zero.
+    operating_expense_ratio_pct: Optional[float] = None
 
 
 class CropCostStructure(CostStructure):
@@ -451,11 +469,21 @@ class CropBreakEvenPrice(BaseModel):
     classification_coverage_pct: Optional[float] = None
 
 
+# "derived" — the window runs from the farm's first surviving log to its last.
+# "specified" — the caller pinned it with ?period_days=. The distinction is
+# reported because a derived window widens with every new log, so a break-even
+# price computed over one is not reproducible after the next entry; a reader
+# comparing two reports has to know whether a moved price means the farm changed
+# or only the window did.
+PeriodSource = Literal["derived", "specified"]
+
+
 class BreakEvenPriceResponse(BaseModel):
     crops: List[CropBreakEvenPrice]
     # The overlay the allocation was drawn from, so a partial overlay is visible
     # rather than being read as a small true fixed cost.
     period_days: float
+    period_source: PeriodSource
     period_fixed_cost_ngn: float
     equipment_count: int
     equipment_unrated_count: int
@@ -483,6 +511,11 @@ class CropSensitivity(BaseModel):
 
 class SensitivityResponse(BaseModel):
     crops: List[CropSensitivity]
+    # Echoed for the same reason as on the break-even response: every price in
+    # this matrix is a break-even price to cover total cost, so every one of
+    # them moves with the depreciation window.
+    period_days: float
+    period_source: PeriodSource
 
 
 class PartialBudgetRequest(BaseModel):
@@ -508,6 +541,10 @@ class CropYieldBaseline(BaseModel):
     # tied extreme is not removed twice. None below three seasons.
     olympic_average_kg: Optional[float] = None
     grand_average_kg: Optional[float] = None
+    # Distinct calendar years of recorded yield. Reported in EVERY case,
+    # including the ones that return no average: a null Olympic average means
+    # something different at one season than at ten, and a null standing
+    # without its count cannot be read either way.
     n_seasons: int
     n_used: int
     n_discarded: int

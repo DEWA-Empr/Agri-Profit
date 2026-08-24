@@ -73,13 +73,25 @@ def get_cost_structure(
     """Cost split by behaviour — variable, semi-variable, recorded fixed and
     unclassified — per crop and farm-wide, with classification coverage.
 
+    Also carries the operating expense ratio — cash operating cost over revenue,
+    per crop and farm-wide. It is here rather than on the break-even route
+    because it is a whole-enterprise cash measure, not a figure per marketable
+    kilogram, and it is null where there is no revenue to be a proportion of.
+
     Coverage is null, never 100 and never 0, where no cost is recorded."""
     return dss_service.get_cost_structure(db, current_user.farm_id, crop)
+
+
+# A century of days. Beyond that the caller is no longer describing a reporting
+# period, and an unbounded value would let one request scale the depreciation
+# charge arbitrarily far above any cost it is set beside.
+MAX_PERIOD_DAYS = 36525.0
 
 
 @router.get("/break-even-price", response_model=schemas.BreakEvenPriceResponse)
 def get_break_even_price(
     crop: Optional[str] = None,
+    period_days: Optional[float] = Query(default=None, gt=0, le=MAX_PERIOD_DAYS),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -91,8 +103,18 @@ def get_break_even_price(
     enterprise_service.break_even_prices): the cash figure is classified
     variable and semi-variable cost only, the total figure is every recorded
     cost plus the allocated fixed overlay. Both are null where the crop has no
-    marketable mass."""
-    return dss_service.get_break_even_price(db, current_user.farm_id, crop)
+    marketable mass.
+
+    `period_days` pins the depreciation window and is OPTIONAL; omitted, the
+    window is derived from the span of the farm's own ledger, and the response
+    says which was used in `period_source`. The override exists for
+    REPRODUCIBILITY: a derived span widens every time a log is entered, the
+    depreciation charge scales with it, and so the break-even price to cover
+    total cost silently moves — a figure reported last week cannot be
+    re-derived, because the window it was computed over no longer exists."""
+    return dss_service.get_break_even_price(
+        db, current_user.farm_id, crop, period_days
+    )
 
 
 @router.get("/sensitivity", response_model=schemas.SensitivityResponse)
@@ -101,6 +123,7 @@ def get_sensitivity(
     # Bounds are on each ITEM, not on the list: a percentage of 0 would ask for
     # a zero harvest, and a negative one for a negative mass.
     percentages: Optional[List[Annotated[int, Field(gt=0, le=1000)]]] = Query(default=None),
+    period_days: Optional[float] = Query(default=None, gt=0, le=MAX_PERIOD_DAYS),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -110,8 +133,14 @@ def get_sensitivity(
     what price covers your costs". It forecasts neither yield nor price, and the
     payload carries `conditional: true` so the interface cannot quietly drop the
     qualifier. Defaults to 75, 90, 100, 110, 125 per cent of the recorded
-    marketable mass."""
-    return dss_service.get_sensitivity(db, current_user.farm_id, crop, percentages)
+    marketable mass.
+
+    `period_days` pins the depreciation window exactly as it does on
+    /break-even-price, and for the same reason: every price in this matrix is a
+    break-even price and moves with that window."""
+    return dss_service.get_sensitivity(
+        db, current_user.farm_id, crop, percentages, period_days
+    )
 
 
 @router.post("/partial-budget", response_model=schemas.PartialBudgetResponse)
@@ -137,7 +166,12 @@ def get_yield_baseline(
     """Olympic and grand average yield per crop, or nulls with a stated reason.
 
     A season is a calendar year of recorded yield — an assumption the model
-    forces, since it has no season entity. The Olympic average needs three
-    seasons and is null below that; the grand average is still reported, so the
-    difference between the two baselines stays visible."""
+    forces, since it has no season entity, recorded as a temporary one in
+    ADR-0002. The Olympic average needs three seasons and is null below that;
+    the grand average is still reported, so the difference between the two
+    baselines stays visible.
+
+    `n_seasons` is reported in every case, including the ones that return no
+    average, so a null is never read without the season count that explains
+    it."""
     return dss_service.get_yield_baseline(db, current_user.farm_id, crop)
