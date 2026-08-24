@@ -22,8 +22,12 @@ _Avoid_: Activity type, log type, transaction type
 The measurable output from a crop or livestock production cycle. Recorded as an Operational Log with Activity Category "Yield" and paired with a revenue Financial Transaction.
 _Avoid_: Harvest, output, produce
 
+**Mechanization**:
+The use of powered machinery or hired machine services in production — land preparation, spraying, threshing, transport. Recorded as an Operational Log with Activity Category Mechanization; a cost-bearing Mechanization log carries a Cost Subtype.
+_Avoid_: Mechanisation, machine work, tractor work
+
 **Bioprocess**:
-A post-harvest processing step applied to Yield before it reaches market (drying, starch hydrolysis, storage conditioning). Recorded as an Operational Log with Activity Category "Bioprocess" and optional structured parameters (e.g. drying time, humidity). The first implemented process type is the Drying Run.
+A post-harvest processing step applied to Yield before it reaches market (drying, starch hydrolysis, storage conditioning). Recorded as an Operational Log with Activity Category "Bioprocess" and optional structured parameters (e.g. drying time, humidity). The first implemented process type is the Drying Run. A cost-bearing Bioprocess log carries a Cost Subtype.
 _Avoid_: Post-harvest activity, processing step
 
 **Drying Run**:
@@ -73,6 +77,40 @@ _Avoid_: Machine, asset, vehicle
 **Maintenance Log**:
 A record of a service or repair event on a specific piece of Equipment, including date, description, and cost.
 _Avoid_: Service record, repair log, maintenance record
+
+### Cost structure
+
+**Cost Subtype**:
+A classification carried on a cost-bearing Operational Log identifying whether the expense scales with production. For Mechanization the set is Fuel, Lubricants, Repairs, Machinery Hire and Depreciation, with equivalent sets for the other Activity Categories. Carried as a structured parameter on the Operational Log, not as a column on the Financial Transaction.
+_Avoid_: Cost type, expense class, cost code
+
+**Cost Behaviour**:
+The derived property of a Cost Subtype describing how it responds to output: Variable (scales with production), Semi-variable (a fixed component plus a variable component), or Fixed (constant regardless of output). A log carrying no Cost Subtype is Unclassified and enters no behaviour bucket — it is never defaulted into one.
+_Avoid_: Fixed/variable, cost nature, direct/indirect
+
+**Classification Coverage**:
+The proportion of a crop's or the farm's recorded cost that carries a Cost Subtype. Reported alongside every figure derived from Cost Behaviour, because a figure computed over partially classified cost is a weaker claim than one computed over fully classified cost and the reader must be able to see which they have.
+_Avoid_: Completeness, data quality score, coverage
+
+**Break-even Price to Cover Cash Cost**:
+The price per kilogram of Marketable Mass at which a crop's classified Variable and Semi-variable cost would be recovered. The short-run continuation threshold: below it, each further kilogram sold loses money outright. A conditional figure, never a price forecast, and distinct both from Break-even Price to Cover Total Cost and from the retrospective break-even yield.
+_Avoid_: Break-even, breakeven price, VC breakeven
+
+**Break-even Price to Cover Total Cost**:
+The price per kilogram of Marketable Mass at which every recorded cost plus Allocated Fixed Cost would be recovered. The long-run survival threshold. It sits at or above Break-even Price to Cover Cash Cost, and the gap between the two is the fixed-cost burden the farm carries whether or not it plants.
+_Avoid_: Break-even, full cost price, TC breakeven
+
+**Allocated Fixed Cost**:
+A crop's share of the farm's periodic fixed cost, derived at report time from Equipment Depreciation and apportioned in proportion to that crop's recorded direct cost. Never a Financial Transaction.
+_Avoid_: Overhead, fixed cost, indirect cost
+
+**Partial Budget**:
+An appraisal of a single proposed change, computed as (additional revenue + reduced cost) − (lost revenue + additional cost). It evaluates only the quantities the change affects, so it needs no complete enterprise budget.
+_Avoid_: ROI, cost-benefit analysis, business case
+
+**Olympic Average Yield**:
+A yield baseline computed by discarding exactly one highest and one lowest observation from a crop's recorded season yields and averaging the remainder. Requires at least three seasons; undefined below that.
+_Avoid_: Trimmed mean, adjusted average, normalised yield
 
 ### Intelligence
 
