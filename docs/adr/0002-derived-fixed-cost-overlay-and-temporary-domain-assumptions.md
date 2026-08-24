@@ -131,5 +131,12 @@ which the caller is not describing a reporting period.
   a better source for either changes the caller, not the arithmetic.
 - Assumption 1 is **not** expected to be removed. Deriving depreciation on read
   is the correct design for an immutable paired-write ledger, not a stopgap.
+- A depreciation rate of exactly zero is rejected rather than stored. The
+  overlay's guard treats zero and null identically, so a stored zero would be a
+  value claiming to be a measurement while behaving as an absence. Requiring
+  such an asset to be entered as genuinely unrated preserves the distinction
+  between an unclassified state and a measured one, consistent with the
+  treatment of unclassified cost and of the safe-storage verdict for an unknown
+  crop.
 - No migration, no new table, no new column. Consistent with ADR-0001: the
   contribution is in what is derived on read, not in what is stored.
