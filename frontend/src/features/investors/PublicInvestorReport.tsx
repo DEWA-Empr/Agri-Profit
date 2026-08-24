@@ -22,6 +22,16 @@ const formatYield = (c: DssCropMetrics) => {
   ));
 };
 
+// Marketable Mass: what actually left the dryer, and therefore the denominator
+// of the cost-per-kg-marketable column standing immediately to its right. It is
+// shown as a quantity in its own cell so a lender can read the division across
+// the row instead of having to work backwards from the rate. Null — an em dash
+// — wherever the crop has no recorded drying run.
+const formatMarketableMass = (c: DssCropMetrics) =>
+  c.marketable_mass_kg != null
+    ? `${c.marketable_mass_kg.toLocaleString(undefined, { maximumFractionDigits: 2 })} kg`
+    : '—';
+
 const PublicInvestorReport = ({ token }: { token: string }) => {
   const [report, setReport] = useState<InvestorReport | null>(null);
   const [state, setState] = useState<'loading' | 'ok' | 'invalid'>('loading');
@@ -134,11 +144,17 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
               ) : (
                 <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    {/* Two unit costs, each named by its denominator. A lender
-                        reading a bare "unit cost" cannot tell which mass it was
-                        divided by, and the two differ by everything drying
-                        removed. */}
-                    <tr><th style={th}>Crop</th><th style={thRight}>Yield</th><th style={thRight}>Unit cost<br />per harvested unit</th><th style={thRight}>Unit cost<br />per kg marketable</th><th style={thRight}>Gross margin</th></tr>
+                    {/* Column order is mass, then the cost that divides by it,
+                        then the second mass and the cost that divides by THAT.
+                        The two masses are not interchangeable — harvested is
+                        what came off the field, marketable is what survived the
+                        dryer — and the two unit costs differ by exactly the
+                        difference between them. Putting each denominator
+                        immediately left of its rate lets a lender read the
+                        division straight across the row rather than inferring
+                        it, or worse, multiplying a per-kg-marketable rate by a
+                        harvested mass. */}
+                    <tr><th style={th}>Crop</th><th style={thRight}>Yield<br />as harvested</th><th style={thRight}>Unit cost<br />per harvested unit</th><th style={thRight}>Marketable mass<br />out of the dryer</th><th style={thRight}>Unit cost<br />per kg marketable</th><th style={thRight}>Gross margin</th></tr>
                   </thead>
                   <tbody>
                     {report.crops.map((c) => (
@@ -149,10 +165,15 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
                             separate quantities they are, never added up. */}
                         <td style={tdRight}>{formatYield(c)}</td>
                         <td style={tdRight}>{c.unit_cost_of_production != null ? naira(c.unit_cost_of_production) : '—'}</td>
-                        {/* Only where the crop actually has a recorded drying
-                            run. marketable_mass_kg is null for a crop sold
-                            fresh, and an em dash is the honest answer there —
-                            not a figure borrowed from the harvest denominator. */}
+                        {/* The marketable pair. Both cells are em dashes for a
+                            crop sold fresh — no drying run means no marketable
+                            mass and no rate to divide by it, and the row reads
+                            exactly as it did before this column existed. The
+                            mass is shown even in the rare case where the rate
+                            is null (zero marketable mass, guarded backend-side)
+                            because a recorded 0 kg out of the dryer is itself
+                            worth seeing. */}
+                        <td style={tdRight}>{formatMarketableMass(c)}</td>
                         <td style={tdRight}>
                           {c.marketable_mass_kg != null && c.unit_cost_per_kg_marketable != null
                             ? naira(c.unit_cost_per_kg_marketable)
@@ -174,9 +195,9 @@ const PublicInvestorReport = ({ token }: { token: string }) => {
                   the numbers on the page. So it is said out loud. */}
               {report.crops.some((c) => c.marketable_mass_kg != null && c.unit_cost_per_kg_marketable != null) && (
                 <p style={{ fontSize: '10px', color: colors.textMuted, padding: '12px 16px', borderTop: `0.5px solid ${colors.dividerLight}`, lineHeight: 1.6 }}>
-                  Cost per kg marketable divides the crop’s total recorded cost by the mass leaving its
-                  drying runs. It assumes the whole harvest was dried. Where only part of a harvest went
-                  through the dryer, this figure overstates the true unit cost.
+                  Cost per kg marketable divides the crop’s total recorded cost by the marketable mass
+                  shown in the column beside it. It assumes the whole harvest was dried. Where only part
+                  of a harvest went through the dryer, this figure overstates the true unit cost.
                 </p>
               )}
             </div>
