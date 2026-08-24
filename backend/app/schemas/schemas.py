@@ -203,7 +203,16 @@ class EquipmentBase(BaseModel):
     model: Optional[str] = None
     purchase_date: Optional[datetime] = None
     purchase_price: Optional[float] = None
-    depreciation_rate: Optional[float] = None
+    # PERCENTAGE, not a fraction: 10.0 is 10%/yr. Validated only when present,
+    # the same nullable-but-bounded shape as MechanizationParams.hours_used —
+    # an asset may legitimately carry no rate, and one that does is excluded
+    # from the depreciation overlay and counted rather than charged at zero.
+    # A rate of 0 is rejected as a mis-entry: it is indistinguishable from
+    # "unrated" in the overlay, so it must be entered as absent, not as zero.
+    # Converted to a fraction once, in dss_service.depreciation_rate_as_fraction.
+    depreciation_rate: Optional[float] = Field(
+        default=None, gt=0, le=100, description="Annual depreciation rate, percent per year"
+    )
 
 class EquipmentCreate(EquipmentBase):
     pass

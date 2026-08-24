@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Tractor, Plus, Wrench, Calendar, Hash } from 'lucide-react';
 import { equipmentService } from '../../lib/apiClient';
-import type { Equipment } from '../../types/domain';
+import type { Equipment, EquipmentCreate } from '../../types/domain';
 import { colors } from '../../styles/theme';
 import { MaintenancePanel } from './components/MaintenancePanel';
 
@@ -11,7 +11,12 @@ const EquipmentPage = () => {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newEq, setNewEq] = useState({ name: '', model: '', purchase_price: 0, depreciation_rate: 10 });
+  // Optional numbers are held as STRINGS so that "left blank" survives to the
+  // payload as absent. There is no default depreciation rate: an asset entered
+  // without one carries null and is excluded from — and counted in — the
+  // depreciation overlay, rather than being charged at a rate nobody chose.
+  const emptyForm = { name: '', model: '', purchase_date: '', purchase_price: '', depreciation_rate: '' };
+  const [newEq, setNewEq] = useState(emptyForm);
   const [maintenanceFor, setMaintenanceFor] = useState<Equipment | null>(null);
 
   const fetchEquipment = () => {
@@ -25,10 +30,18 @@ const EquipmentPage = () => {
 
   const handleAddEquipment = async (e: FormEvent) => {
     e.preventDefault();
+    // A blank optional field is omitted, not sent as 0. Zero is a real value the
+    // API rejects for a rate, and a zero purchase price would understate the
+    // overlay silently.
+    const payload: EquipmentCreate = { name: newEq.name };
+    if (newEq.model) payload.model = newEq.model;
+    if (newEq.purchase_date) payload.purchase_date = newEq.purchase_date;
+    if (newEq.purchase_price !== '') payload.purchase_price = parseFloat(newEq.purchase_price);
+    if (newEq.depreciation_rate !== '') payload.depreciation_rate = parseFloat(newEq.depreciation_rate);
     try {
-      await equipmentService.createEquipment(newEq);
+      await equipmentService.createEquipment(payload);
       setShowAddForm(false);
-      setNewEq({ name: '', model: '', purchase_price: 0, depreciation_rate: 10 });
+      setNewEq(emptyForm);
       fetchEquipment();
     } catch (err) {
       console.error('Error adding equipment:', err);
@@ -61,7 +74,29 @@ const EquipmentPage = () => {
           </div>
           <div>
             <label style={label}>Price (₦)</label>
-            <input type="number" value={newEq.purchase_price} onChange={(e) => setNewEq({ ...newEq, purchase_price: parseFloat(e.target.value) })} style={input} />
+            <input type="number" min="0" step="any" value={newEq.purchase_price} onChange={(e) => setNewEq({ ...newEq, purchase_price: e.target.value })} style={input} />
+          </div>
+          <div>
+            <label style={label}>Purchase date</label>
+            <input type="date" value={newEq.purchase_date} onChange={(e) => setNewEq({ ...newEq, purchase_date: e.target.value })} style={input} />
+          </div>
+          <div>
+            {/* Unit in the label, and NO pre-filled value: a rate the farmer did
+                not choose would be charged against them as though they had. */}
+            <label style={label}>Depreciation rate (%/yr)</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="any"
+              placeholder="e.g. 10"
+              value={newEq.depreciation_rate}
+              onChange={(e) => setNewEq({ ...newEq, depreciation_rate: e.target.value })}
+              style={input}
+            />
+            <p style={{ fontSize: '10px', color: colors.textMuted, marginTop: '3px' }}>
+              Optional. Left blank, this asset is excluded from the depreciation overlay.
+            </p>
           </div>
           <button type="submit" style={{ background: colors.primaryDark, color: colors.onPrimary, padding: '9px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Save</button>
         </form>

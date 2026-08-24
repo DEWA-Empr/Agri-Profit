@@ -368,6 +368,65 @@ def test_ledger_isolation_between_farms(make_client):
     assert farm_b.get("/api/v1/dss/decision-support").json()["crops"] == []
 
 
+def test_equipment_accepts_a_null_depreciation_rate(client):
+    """An asset with no rate is a legitimate record, not a validation failure.
+    It is excluded from the depreciation overlay and counted there — never
+    charged at a rate nobody entered."""
+    resp = client.post("/api/v1/equipment/", json={"name": "Unrated hoe", "purchase_price": 9000.0})
+    assert resp.status_code == 201
+    assert resp.json()["depreciation_rate"] is None
+
+    body = client.get("/api/v1/dss/break-even-price").json()
+    assert body["equipment_count"] == 1
+    assert body["equipment_unrated_count"] == 1
+    # Counted, and contributing nothing — not a small charge that would read as
+    # a small true fixed cost.
+    assert body["period_fixed_cost_ngn"] == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("rate", [0, 0.0, -1.0, 100.1, 1000.0])
+def test_equipment_rejects_a_rate_outside_the_percentage_band(client, rate):
+    """0 < rate <= 100. Zero is refused because it is indistinguishable from
+    unrated in the overlay, and a rate above 100%/yr writes the asset off in
+    under a year, which straight-line depreciation cannot express."""
+    resp = client.post(
+        "/api/v1/equipment/",
+        json={"name": "Bad rate", "purchase_price": 1000.0, "depreciation_rate": rate},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("rate", [0.01, 10.0, 100.0])
+def test_equipment_accepts_rates_on_and_inside_the_band(client, rate):
+    resp = client.post(
+        "/api/v1/equipment/",
+        json={"name": "Good rate", "purchase_price": 1000.0, "depreciation_rate": rate},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["depreciation_rate"] == pytest.approx(rate)
+
+
+def test_equipment_purchase_date_round_trips(client):
+    """The column and schema have always accepted it; nothing sent it until the
+    form began collecting it."""
+    resp = client.post(
+        "/api/v1/equipment/",
+        json={"name": "Dated dryer", "purchase_price": 1000.0, "purchase_date": "2026-03-01"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["purchase_date"].startswith("2026-03-01")
+
+
+def test_depreciation_rate_is_converted_to_a_fraction_exactly_once(client):
+    """THE UNIT BOUNDARY. 10%/yr on 240,000 is 24,000 a year, not 24 and not
+    2,400,000. The percentage crosses into a fraction in
+    dss_service.depreciation_rate_as_fraction and nowhere else."""
+    _seed_rated_equipment(client)
+    body = client.get("/api/v1/dss/break-even-price?period_days=365").json()
+    assert body["period_fixed_cost_ngn"] == pytest.approx(24000.0, rel=1e-9)
+    assert body["equipment_unrated_count"] == 0
+
+
 def test_equipment_isolation_cross_farm_read_rejected(make_client):
     farm_a = make_client(farm_name="Farm A")
     farm_b = make_client(farm_name="Farm B")
@@ -1750,16 +1809,14 @@ def test_enterprise_sensitivity_matrix_is_labelled_conditional(client):
 # pins the window; period_source says which the reader is looking at.
 
 def _seed_rated_equipment(client):
-    """One rated asset: 240,000 at 0.10/yr, so 24,000 a year of charge.
+    """One rated asset: 240,000 at 10%/yr, so 24,000 a year of charge.
 
-    The rate is a FRACTION here, matching Fixture B; models.py:132 calls the
-    column an annual percentage and enterprise_service multiplies by it
-    directly, so the two readings disagree. Not this amendment's to settle —
-    the tests below assert only that a pinned window and a derived one give the
-    charge the same treatment, which holds under either reading."""
+    The rate is a PERCENTAGE here, because that is the unit the API takes.
+    `dss_service.depreciation_rate_as_fraction` turns it into the 0.10 that
+    Fixture B feeds `depreciation_overlay` directly."""
     resp = client.post(
         "/api/v1/equipment/",
-        json={"name": "Bench dryer", "purchase_price": 240000.0, "depreciation_rate": 0.10},
+        json={"name": "Bench dryer", "purchase_price": 240000.0, "depreciation_rate": 10.0},
     )
     assert resp.status_code == 201
     return resp.json()["id"]

@@ -104,11 +104,21 @@ compensating entry, which is truthful but not self-explanatory to a lay reader.
 **Numeric input validation is incomplete.** The schema validates enums, email
 format, password length, and the DSS model's input bounds, and no endpoint was
 observed to return a 500 on malformed input during the audit. However, monetary
-and quantity fields (`amount`, `purchase_price`, `depreciation_rate`, `cost`) are
-unconstrained floats: the audit confirmed that a negative amount and an
+and quantity fields (`amount`, `purchase_price`, `cost`) are
+unconstrained floats (`depreciation_rate` is now bounded to 0 < rate <= 100): the audit confirmed that a negative amount and an
 absurdly large amount are currently accepted and persisted rather than rejected
 with a 422. Such values distort the P&L. Adding lower/upper bounds at the schema
 edge is a small, well-understood fix and is listed as near-term future work.
+
+**An equipment record cannot be corrected.** Equipment is create-and-read only:
+there is no PATCH or PUT on `/equipment/{id}` and no edit surface anywhere in
+the interface. A depreciation rate — or a purchase price or date — entered
+wrongly is permanent, and because the rate drives the depreciation overlay, the
+allocated fixed cost and both break-even prices, a mistyped rate silently biases
+every derived cost figure for that farm with no route to fix it short of direct
+database access. Unlike the ledger, where immutability is a deliberate design
+choice serviced by reversal, this is simply a missing write path: equipment is
+not a financial record and has no audit reason to be append-only.
 
 **Per-crop decision support does not yet net reversals.** The farm-wide P&L and
 its top-line figures correctly subtract a reversal from the pile its category

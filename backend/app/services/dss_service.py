@@ -463,6 +463,25 @@ DERIVED = "derived"
 SPECIFIED = "specified"
 
 
+def depreciation_rate_as_fraction(rate_pct: Optional[float]) -> Optional[float]:
+    """THE ONE PLACE a depreciation rate changes unit. 10.0 (%/yr) -> 0.10.
+
+    The rate is captured, stored, transmitted and displayed as a PERCENTAGE,
+    because that is the unit the farmer enters and reads. Every arithmetic
+    consumer wants a fraction. Converting once, here, at the boundary where
+    equipment rows are assembled into `depreciation_overlay`'s input, is what
+    keeps the two readings from drifting: nothing downstream divides by 100
+    again, and nothing upstream has to remember to divide first.
+
+    This mirrors the wet-basis/dry-basis convention in ADR-0001 — enter in the
+    unit the human uses, convert once, work internally in the other.
+
+    None passes through as None; an unrated asset stays unrated rather than
+    becoming a zero charge, and `depreciation_overlay` counts it.
+    """
+    return None if rate_pct is None else rate_pct / 100.0
+
+
 def _equipment_overlay(
     db: Session,
     farm_id: int,
@@ -507,7 +526,12 @@ def _equipment_overlay(
 
     overlay = enterprise_service.depreciation_overlay(
         equipment=[
-            {"purchase_value_ngn": e.purchase_price, "depreciation_rate": e.depreciation_rate}
+            {
+                "purchase_value_ngn": e.purchase_price,
+                # Percentage on the column, fraction in the overlay. Converted
+                # here and nowhere else.
+                "depreciation_rate": depreciation_rate_as_fraction(e.depreciation_rate),
+            }
             for e in equipment
         ],
         period_days=period_days,

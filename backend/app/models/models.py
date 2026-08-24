@@ -129,7 +129,13 @@ class Equipment(Base):
     model = Column(String)
     purchase_date = Column(DateTime)
     purchase_price = Column(Float)
-    depreciation_rate = Column(Float)  # Annual percentage
+    # Annual percentage: 10.0 means 10%/yr, the unit the farmer enters and
+    # reads. It is converted to a fraction exactly once, in
+    # dss_service.depreciation_rate_as_fraction, where equipment rows are
+    # assembled into the depreciation overlay's input. Nowhere else divides.
+    # Nullable: an asset entered without a rate is excluded from the overlay
+    # and counted there, never charged at zero.
+    depreciation_rate = Column(Float)
 
 class MaintenanceLog(Base):
     __tablename__ = "maintenance_logs"
