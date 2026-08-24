@@ -391,3 +391,131 @@ class BioprocessCropSummary(BaseModel):
 
 class BioprocessSummary(BaseModel):
     crops: List[BioprocessCropSummary]
+
+
+# --- Enterprise economics responses (Phase 4) -----------------------------
+# Every field below is derived on read by enterprise_service from ledger rows;
+# nothing here is persisted, and the depreciation overlay in particular is never
+# posted to the ledger. Reversal logs and reversed logs are excluded from every
+# aggregation, so neither reaches a numerator or a denominator.
+
+
+class CostStructure(BaseModel):
+    """Section 4.1 for one crop, or farm-wide."""
+    variable_cost: float
+    # Reported on its own line rather than folded silently into the variable
+    # pool: Repairs are genuinely semi-variable, and the reader must be able to
+    # see the assumption. It IS part of cash_cost for computation.
+    semi_variable_cost: float
+    # Recorded FIXED cost — a DEPRECIATION row actually posted to the ledger.
+    # Distinct from the allocated-fixed overlay, which is never a ledger entry.
+    fixed_cost_recorded: float
+    # Cost carrying no Cost Subtype: every legacy row, and every category
+    # outside the taxonomy. Never defaulted into a behaviour bucket.
+    unclassified_cost: float
+    total_recorded_cost: float
+    cash_cost: float
+    # None when total_recorded_cost is 0 — not 100, not 0. There is no coverage
+    # of nothing, and a vacuous 100 would read as "fully classified".
+    classification_coverage_pct: Optional[float] = None
+
+
+class CropCostStructure(CostStructure):
+    crop: str
+
+
+class CostStructureResponse(BaseModel):
+    crops: List[CropCostStructure]
+    farm: CostStructure
+
+
+class CropBreakEvenPrice(BaseModel):
+    """Section 4.4 for one crop. The two prices do NOT share a cost base."""
+    crop: str
+    # Short-run continuation threshold: classified variable + semi-variable cost
+    # only. Below it, each additional kilogram sold loses money outright.
+    break_even_price_cash_ngn_per_kg: Optional[float] = None
+    # Long-run survival threshold: EVERY recorded cost (unclassified included)
+    # plus the allocated fixed overlay. Always strictly above the cash figure.
+    break_even_price_total_ngn_per_kg: Optional[float] = None
+    # The four cost lines, reported separately rather than collapsed into two,
+    # because unclassified cost sits inside the total figure and outside the
+    # cash one and so inflates the gap between them.
+    variable_and_semi_variable_cost_ngn: float
+    total_recorded_cost_ngn: float
+    allocated_fixed_ngn: Optional[float] = None
+    total_cost_ngn: float
+    # None when the crop has no non-reversed drying run; both prices are then
+    # None too — undefined, never a fabricated zero.
+    marketable_mass_kg: Optional[float] = None
+    classification_coverage_pct: Optional[float] = None
+
+
+class BreakEvenPriceResponse(BaseModel):
+    crops: List[CropBreakEvenPrice]
+    # The overlay the allocation was drawn from, so a partial overlay is visible
+    # rather than being read as a small true fixed cost.
+    period_days: float
+    period_fixed_cost_ngn: float
+    equipment_count: int
+    equipment_unrated_count: int
+    total_direct_cost_all_crops: float
+
+
+class SensitivityRow(BaseModel):
+    percentage: int
+    marketable_mass_kg: Optional[float] = None
+    break_even_price_cash_ngn_per_kg: Optional[float] = None
+    break_even_price_total_ngn_per_kg: Optional[float] = None
+
+
+class CropSensitivity(BaseModel):
+    crop: str
+    # CONDITIONAL, never predictive: the matrix answers "if you harvest this
+    # much, what price covers your costs". It forecasts neither yield nor price,
+    # and the interface copy must carry that explicitly.
+    conditional: bool
+    baseline_marketable_mass_kg: Optional[float] = None
+    cash_cost_ngn: float
+    total_cost_ngn: float
+    rows: List[SensitivityRow]
+
+
+class SensitivityResponse(BaseModel):
+    crops: List[CropSensitivity]
+
+
+class PartialBudgetRequest(BaseModel):
+    """Four quantities, all required and all non-negative: the sign of the
+    appraisal lives in which slot a quantity occupies, not in the number."""
+    added_revenue_ngn: float = Field(..., ge=0)
+    reduced_cost_ngn: float = Field(..., ge=0)
+    lost_revenue_ngn: float = Field(..., ge=0)
+    added_cost_ngn: float = Field(..., ge=0)
+
+
+class PartialBudgetResponse(PartialBudgetRequest):
+    benefits_ngn: float
+    costs_ngn: float
+    # Signed and unclamped. A negative net change is a valid and useful answer —
+    # it says the change is not worth making.
+    net_change_ngn: float
+
+
+class CropYieldBaseline(BaseModel):
+    crop: str
+    # Discards exactly ONE maximum observation and ONE minimum instance, so a
+    # tied extreme is not removed twice. None below three seasons.
+    olympic_average_kg: Optional[float] = None
+    grand_average_kg: Optional[float] = None
+    n_seasons: int
+    n_used: int
+    n_discarded: int
+    unit: Optional[str] = None
+    # Why a figure is null, in words. A bare null leaves the reader unable to
+    # tell "too few seasons" from "mixed units" from "nothing recorded".
+    reason: Optional[str] = None
+
+
+class YieldBaselineResponse(BaseModel):
+    crops: List[CropYieldBaseline]

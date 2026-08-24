@@ -17,11 +17,14 @@ fabricated figure — when the crop has no recorded yield, so we never divide by
 zero. Logs with no crop tag (pre-existing rows, or app entries without a crop)
 fall into an "Unspecified" bucket rather than being dropped.
 """
+from typing import Optional, Sequence
+
 from sqlalchemy.orm import Session
 
 from ..core.enums import Category, TransactionType
+from ..core.exceptions import NotFoundError
 from ..models import models
-from . import reports_service
+from . import enterprise_service, reports_service
 
 UNSPECIFIED = "Unspecified"
 
@@ -261,3 +264,306 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
             "gross_margin": pnl["gross_margin"],
         },
     }
+
+
+# --- Enterprise economics aggregation (Phase 4) ----------------------------
+# The arithmetic lives in enterprise_service (pure, 100% covered). Everything
+# below is the DB-aware half: it selects the farm's rows, projects them into the
+# plain tuples and dicts that module expects, and shapes the response.
+#
+# REVERSAL HANDLING, and it differs deliberately from get_decision_support
+# above. That function NETS a contra out by subtracting it inside the pile its
+# type feeds, which is right for a money total. It is wrong here, because these
+# figures have a DENOMINATOR as well as a numerator: a reversal carries no cost
+# subtype, so netting it would leave its amount inside total_recorded_cost while
+# contributing nothing classified, and classification coverage would fall every
+# time a farmer corrected a mistake. Correcting the ledger would look
+# indistinguishable from a data-quality problem.
+#
+# So both sides of a reversal pair are EXCLUDED outright — the contra and the
+# log it reverses, from cost, from revenue and from marketable mass alike. For
+# money totals exclusion and subtraction agree (reverse_log mirrors the
+# original's amount exactly); only exclusion also keeps the denominator right.
+
+
+class CropNotFound(NotFoundError):
+    """A crop filter that matches nothing in this farm — including a crop that
+    exists only in another farm. Same verdict either way, so no existence leak."""
+
+
+def _live_rows(db: Session, farm_id: int):
+    """Every (log, transaction) pair in the farm that still stands.
+
+    Excludes reversal contras (`reverses_id is not None`) and the logs they
+    reverse. Returns the surviving rows plus the crop each log belongs to.
+    """
+    OL = models.OperationalLog
+    FT = models.FinancialTransaction
+
+    rows = (
+        db.query(OL, FT)
+        .join(FT, OL.financial_transaction_id == FT.id)
+        .filter(OL.farm_id == farm_id)
+        .all()
+    )
+    reversed_ids = {log.reverses_id for log, _ in rows if log.reverses_id is not None}
+    return [
+        (log, tx)
+        for log, tx in rows
+        if log.reverses_id is None and log.id not in reversed_ids
+    ]
+
+
+def _cost_subtype(log) -> Optional[str]:
+    """The Cost Subtype carried on a log, or None.
+
+    Read ONLY off mechanisation rows. Every other activity type keeps
+    `extra_data` as an arbitrary dict, so a seed log that happens to contain a
+    `cost_subtype` key is not making a classification claim — and treating it as
+    one would look up ("SEED", "FUEL"), miss, and push a correctly classified
+    row into the unclassified pile.
+    """
+    if log.activity_type != Category.MECHANIZATION:
+        return None
+    if not log.extra_data:
+        return None
+    return log.extra_data.get("cost_subtype")
+
+
+def _enterprise_base(rows) -> dict:
+    """Project the farm's surviving rows into per-crop economics inputs.
+
+    Returns cost entry tuples, marketable mass and yield observations per crop.
+    Costs are DEBIT transactions; credits are revenue and are not cost entries.
+
+    No revenue total is accumulated here: none of the five routes needs one.
+    The operating expense ratio (enterprise_service.operating_expense_ratio_pct)
+    does, but it has no route in this phase — see the ticket, section 5.
+    """
+    per_crop: dict[str, dict] = {}
+
+    for log, tx in rows:
+        crop = log.crop or UNSPECIFIED
+        b = per_crop.setdefault(
+            crop,
+            {"cost_entries": [], "marketable_mass_kg": None, "yields": []},
+        )
+        amount = float(tx.amount or 0.0)
+
+        # Costs only. A credit is revenue, and revenue is not a cost entry —
+        # letting one through would put a sale into the classification
+        # denominator and read as a large unclassified expense.
+        if tx.transaction_type != TransactionType.CREDIT:
+            b["cost_entries"].append(
+                (amount, log.activity_type.value, _cost_subtype(log))
+            )
+
+        if log.activity_type == Category.BIOPROCESS and log.extra_data:
+            mass_out = log.extra_data.get("mass_out_kg")
+            if mass_out is not None:
+                b["marketable_mass_kg"] = (b["marketable_mass_kg"] or 0.0) + float(mass_out)
+
+        if log.activity_type == Category.YIELD and log.quantity:
+            b["yields"].append((log.timestamp, float(log.quantity), log.unit))
+
+    return per_crop
+
+
+def _select_crops(per_crop: dict, crop: Optional[str]) -> list[str]:
+    """The crop keys to report, honouring an optional filter.
+
+    An unmatched filter raises rather than returning an empty list: asking about
+    a crop this farm has no record of is a 404, exactly as another farm's
+    equipment id is. A farm with no records at all still returns an empty list
+    for the unfiltered call — that is an empty state, not a missing resource.
+    """
+    if crop is None:
+        return sorted(per_crop)
+    if crop not in per_crop:
+        raise CropNotFound(f"No records for crop '{crop}'")
+    return [crop]
+
+
+def get_cost_structure(db: Session, farm_id: int, crop: Optional[str] = None) -> dict:
+    """Section 4.1 per crop and farm-wide, with classification coverage.
+
+    The farm-wide summary is computed over every crop's entries regardless of
+    the `crop` filter — it is the farm's cost structure, not the filtered
+    subset's, and re-deriving it from a filtered list would silently answer a
+    different question.
+    """
+    per_crop = _enterprise_base(_live_rows(db, farm_id))
+    keys = _select_crops(per_crop, crop)
+
+    crops = [
+        {"crop": key, **enterprise_service.cost_structure(per_crop[key]["cost_entries"])}
+        for key in keys
+    ]
+    farm_entries = [e for b in per_crop.values() for e in b["cost_entries"]]
+    return {"crops": crops, "farm": enterprise_service.cost_structure(farm_entries)}
+
+
+def _equipment_overlay(db: Session, farm_id: int, rows) -> dict:
+    """The farm's depreciation overlay over the span its ledger actually covers.
+
+    The period is derived from the ledger rather than asked for: it runs from
+    the first surviving log to the last, inclusive, so the charge lines up with
+    the costs it is being compared against. It is reported in the response
+    (`period_days`) rather than buried, because a reader who cannot see the
+    window cannot judge the charge.
+    """
+    equipment = (
+        db.query(models.Equipment).filter(models.Equipment.farm_id == farm_id).all()
+    )
+    stamps = [log.timestamp for log, _ in rows if log.timestamp is not None]
+    # Inclusive of both endpoints, so a single day of records is one day and not
+    # zero — a zero-length period would zero the overlay for a real farm.
+    period_days = ((max(stamps) - min(stamps)).days + 1) if stamps else 0.0
+
+    return enterprise_service.depreciation_overlay(
+        equipment=[
+            {"purchase_value_ngn": e.purchase_price, "depreciation_rate": e.depreciation_rate}
+            for e in equipment
+        ],
+        period_days=period_days,
+    )
+
+
+def get_break_even_price(db: Session, farm_id: int, crop: Optional[str] = None) -> dict:
+    """Section 4.4: both conditional break-even prices, the four cost lines,
+    coverage, and the count of unrated equipment.
+
+    The allocation base is FARM-WIDE and is computed before any filter is
+    applied. A crop's share of fixed cost is its share of the whole farm's
+    direct cost; deriving it from the filtered subset would give a single
+    filtered crop a share of 1.0 and hand it the entire overlay.
+    """
+    # ONE pass over the ledger, shared by the projection and the overlay window.
+    rows = _live_rows(db, farm_id)
+    per_crop = _enterprise_base(rows)
+    keys = _select_crops(per_crop, crop)
+
+    overlay = _equipment_overlay(db, farm_id, rows)
+    structures = {
+        key: enterprise_service.cost_structure(b["cost_entries"])
+        for key, b in per_crop.items()
+    }
+    allocation = enterprise_service.allocate_fixed_cost(
+        period_fixed_cost_ngn=overlay["period_charge_ngn"],
+        direct_cost_by_crop={
+            key: s["total_recorded_cost"] for key, s in structures.items()
+        },
+    )
+
+    crops = []
+    for key in keys:
+        s = structures[key]
+        crops.append({
+            "crop": key,
+            **enterprise_service.break_even_prices(
+                cash_cost=s["cash_cost"],
+                total_recorded_cost=s["total_recorded_cost"],
+                allocated_fixed_ngn=allocation["allocations"][key]["allocated_fixed_ngn"],
+                marketable_mass_kg=per_crop[key]["marketable_mass_kg"],
+                classification_coverage_pct=s["classification_coverage_pct"],
+            ),
+        })
+
+    return {
+        "crops": crops,
+        "period_days": overlay["period_days"],
+        "period_fixed_cost_ngn": overlay["period_charge_ngn"],
+        "equipment_count": overlay["equipment_count"],
+        "equipment_unrated_count": overlay["equipment_unrated_count"],
+        "total_direct_cost_all_crops": allocation["total_direct_cost_all_crops"],
+    }
+
+
+def get_sensitivity(
+    db: Session,
+    farm_id: int,
+    crop: Optional[str] = None,
+    percentages: Optional[Sequence[int]] = None,
+) -> dict:
+    """Section 4.5: the conditional yield sensitivity matrix, per crop.
+
+    Built on the same cost bases as get_break_even_price, so a row at 100% is
+    the same pair of numbers that endpoint reports.
+    """
+    base = get_break_even_price(db, farm_id, crop)
+    pct = percentages or enterprise_service.DEFAULT_SENSITIVITY_PCT
+
+    crops = []
+    for c in base["crops"]:
+        crops.append({
+            "crop": c["crop"],
+            **enterprise_service.yield_sensitivity(
+                baseline_marketable_mass_kg=c["marketable_mass_kg"],
+                cash_cost=c["variable_and_semi_variable_cost_ngn"],
+                total_cost=c["total_cost_ngn"],
+                percentages=pct,
+            ),
+        })
+    return {"crops": crops}
+
+
+def get_yield_baseline(db: Session, farm_id: int, crop: Optional[str] = None) -> dict:
+    """Section 4.8: Olympic and grand average yield per crop, or nulls with a reason.
+
+    A SEASON IS A CALENDAR YEAR of recorded yield, and that is an assumption,
+    not a measurement: the model has no season entity, so the year a yield was
+    logged in is the only grouping available. Several yield logs in one year are
+    one season, summed.
+
+    Mixed units within a crop return nulls with a reason rather than a total —
+    the same verdict get_decision_support gives, for the same cause: quantities
+    in different units cannot be summed, and no honest single baseline exists.
+    """
+    per_crop = _enterprise_base(_live_rows(db, farm_id))
+    keys = _select_crops(per_crop, crop)
+
+    crops = []
+    for key in keys:
+        observations = per_crop[key]["yields"]
+        units = {(u or "").strip().lower() or None for _, _, u in observations}
+
+        if not observations:
+            crops.append({
+                "crop": key, "olympic_average_kg": None, "grand_average_kg": None,
+                "n_seasons": 0, "n_used": 0, "n_discarded": 0, "unit": None,
+                "reason": "No yield has been recorded for this crop.",
+            })
+            continue
+
+        if len(units) > 1:
+            crops.append({
+                "crop": key, "olympic_average_kg": None, "grand_average_kg": None,
+                "n_seasons": 0, "n_used": 0, "n_discarded": 0, "unit": None,
+                "reason": (
+                    "This crop's yields are recorded in more than one unit, so no "
+                    "single baseline exists. See the per-unit breakdown instead."
+                ),
+            })
+            continue
+
+        by_season: dict[int, float] = {}
+        for stamp, quantity, _ in observations:
+            by_season[stamp.year] = by_season.get(stamp.year, 0.0) + quantity
+        seasons = [by_season[year] for year in sorted(by_season)]
+
+        result = enterprise_service.olympic_average_yield(seasons)
+        reason = None
+        if result["olympic_average_kg"] is None:
+            reason = (
+                f"An Olympic average needs at least "
+                f"{enterprise_service.MIN_SEASONS_FOR_OLYMPIC} seasons; this crop has "
+                f"{result['n_seasons']}. The grand average is shown instead."
+            )
+        crops.append({
+            "crop": key,
+            **result,
+            "unit": next(iter(units)),
+            "reason": reason,
+        })
+
+    return {"crops": crops}

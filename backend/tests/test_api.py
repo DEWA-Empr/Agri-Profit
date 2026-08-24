@@ -1461,3 +1461,288 @@ def test_dss_model_reports_untrained_without_zero_metrics(client, monkeypatch):
     # answer — would otherwise trip this check.
     numeric = [v for v in body.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
     assert not any(v == 0 for v in numeric)
+
+
+# --- Enterprise economics endpoints (Phase 4, Fixture H) ------------------
+# Five read/appraise routes over the same farm-scoped ledger. Every cost figure
+# below is aggregated by enterprise_service (pure) from rows selected here; the
+# routes write nothing, and the depreciation overlay is never posted.
+
+def _post_mech_cost(client, *, crop, amount, subtype, hours=4.5):
+    """A mechanisation cost carrying a cost subtype (so it classifies)."""
+    extra = {"cost_subtype": subtype, "hours_used": hours} if subtype else None
+    payload = {
+        "activity_type": "mechanization",
+        "description": "{} mechanisation cost".format(crop),
+        "crop": crop,
+        "extra_data": extra,
+        "financial_data": {"amount": amount, "transaction_type": "debit", "category": "mechanization"},
+    }
+    return client.post("/api/v1/ledger/logs", json=payload)
+
+
+def _seed_fixture_a(client):
+    """Fixture A cost profile for maize, through the real write path: fuel 1,200
+    + hire 800 + repairs 500 + fertilizer 900 + labour 600, plus one legacy
+    mechanisation row of 400 carrying no extra_data at all."""
+    assert _post_mech_cost(client, crop="maize", amount=1200.0, subtype="FUEL").status_code == 201
+    assert _post_mech_cost(client, crop="maize", amount=800.0, subtype="MACHINERY_HIRE").status_code == 201
+    assert _post_mech_cost(client, crop="maize", amount=500.0, subtype="REPAIRS").status_code == 201
+    assert _post_crop_log(client, activity_type="fertilizer", crop="maize", amount=900.0, transaction_type="debit").status_code == 201
+    assert _post_crop_log(client, activity_type="labour", crop="maize", amount=600.0, transaction_type="debit").status_code == 201
+    assert _post_mech_cost(client, crop="maize", amount=400.0, subtype=None).status_code == 201
+
+
+def test_enterprise_cost_structure_matches_fixture_a(client):
+    # Fixture A, end to end: the same numbers the unit tests assert, but reached
+    # through the ledger, so the projection from log rows to (amount, category,
+    # subtype) tuples is exercised too.
+    _seed_fixture_a(client)
+    body = client.get("/api/v1/dss/cost-structure").json()
+
+    maize = next(c for c in body["crops"] if c["crop"] == "maize")
+    assert maize["variable_cost"] == pytest.approx(3500.0)
+    assert maize["semi_variable_cost"] == pytest.approx(500.0)
+    assert maize["unclassified_cost"] == pytest.approx(400.0)
+    assert maize["total_recorded_cost"] == pytest.approx(4400.0)
+    assert maize["cash_cost"] == pytest.approx(4000.0)
+    assert maize["classification_coverage_pct"] == pytest.approx(90.9091, rel=1e-4)
+    # Farm-wide mirrors the single crop when only one crop has cost.
+    assert body["farm"]["total_recorded_cost"] == pytest.approx(4400.0)
+    assert body["farm"]["classification_coverage_pct"] == pytest.approx(90.9091, rel=1e-4)
+
+
+def test_enterprise_cost_structure_reads_subtype_only_for_mechanization(client):
+    # A seed log may carry an arbitrary extra_data dict, and that dict may happen
+    # to contain the key cost_subtype. It is NOT a classification: only
+    # mechanisation rows carry the taxonomy. Reading the key off every category
+    # would turn ("SEED", "FUEL") into a missing lookup and silently push a
+    # correctly classified row into the unclassified pile.
+    payload = {
+        "activity_type": "seed",
+        "crop": "maize",
+        "extra_data": {"cost_subtype": "FUEL", "note": "arbitrary"},
+        "financial_data": {"amount": 1000.0, "transaction_type": "debit", "category": "seed"},
+    }
+    assert client.post("/api/v1/ledger/logs", json=payload).status_code == 201
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/cost-structure").json()["crops"] if c["crop"] == "maize"
+    )
+    assert maize["variable_cost"] == pytest.approx(1000.0)
+    assert maize["unclassified_cost"] == pytest.approx(0.0)
+    assert maize["classification_coverage_pct"] == pytest.approx(100.0)
+
+
+def test_enterprise_reversal_excluded_from_buckets_and_does_not_lower_coverage(client):
+    """THE SUBTLE ONE. A reversal contra carries no cost subtype, so if it is
+    merely netted out of the numerator while its amount stays in the
+    denominator, classification coverage silently falls and a correction to the
+    ledger starts to look like a data-quality problem. Both the reversal AND the
+    log it reverses are excluded from every bucket, numerator and denominator
+    alike."""
+    _seed_fixture_a(client)
+    before = client.get("/api/v1/dss/cost-structure").json()
+    maize_before = next(c for c in before["crops"] if c["crop"] == "maize")
+    assert maize_before["classification_coverage_pct"] == pytest.approx(90.9091, rel=1e-4)
+
+    # Post a large classified mechanisation cost, then reverse it.
+    created = _post_mech_cost(client, crop="maize", amount=9000.0, subtype="FUEL")
+    assert created.status_code == 201
+    log_id = created.json()["id"]
+    assert client.post("/api/v1/ledger/logs/{}/reverse".format(log_id)).status_code == 201
+
+    after = client.get("/api/v1/dss/cost-structure").json()
+    maize_after = next(c for c in after["crops"] if c["crop"] == "maize")
+
+    # Every bucket is exactly as it was: the pair leaves no trace anywhere.
+    assert maize_after == maize_before
+    assert after["farm"] == before["farm"]
+
+    # Stated individually too, because == on the whole dict would also pass if
+    # both sides were wrong in the same way.
+    assert maize_after["variable_cost"] == pytest.approx(3500.0)      # not 12,500
+    assert maize_after["unclassified_cost"] == pytest.approx(400.0)   # not 9,400
+    assert maize_after["total_recorded_cost"] == pytest.approx(4400.0)
+    # The denominator assertion: coverage did NOT fall. Still 400 unclassified
+    # out of 4,400 — not 9,400/13,400 (70.1%), and not 400/13,400 (97.0%).
+    assert maize_after["classification_coverage_pct"] == pytest.approx(90.9091, rel=1e-4)
+
+    # And the pair is absent from every downstream figure, not just this one.
+    be = client.get("/api/v1/dss/break-even-price?crop=maize").json()["crops"][0]
+    assert be["total_recorded_cost_ngn"] == pytest.approx(4400.0)
+    assert be["classification_coverage_pct"] == pytest.approx(90.9091, rel=1e-4)
+
+
+def test_enterprise_break_even_prices_null_without_marketable_mass(client):
+    # Fixture H: a crop with recorded cost but no drying run has no marketable
+    # mass, and a price per marketable kilogram is undefined — never a
+    # fabricated zero, never a division by zero.
+    _seed_fixture_a(client)
+    body = client.get("/api/v1/dss/break-even-price?crop=maize").json()
+    maize = body["crops"][0]
+
+    assert maize["marketable_mass_kg"] is None
+    assert maize["break_even_price_cash_ngn_per_kg"] is None
+    assert maize["break_even_price_total_ngn_per_kg"] is None
+    # The cost lines are still reported: the costs are known, only the price is not.
+    assert maize["variable_and_semi_variable_cost_ngn"] == pytest.approx(4000.0)
+    assert maize["total_recorded_cost_ngn"] == pytest.approx(4400.0)
+
+
+def test_enterprise_break_even_prices_with_marketable_mass_never_collapse(client):
+    # With a drying run present both prices are defined — and they must not be
+    # the same number. The gap between them IS the fixed-cost argument.
+    _seed_fixture_a(client)
+    assert _post_drying(client, crop="maize", amount=0.0).status_code == 201  # 84.0 kg out
+
+    body = client.get("/api/v1/dss/break-even-price?crop=maize").json()
+    maize = body["crops"][0]
+    assert maize["marketable_mass_kg"] == pytest.approx(84.0)
+    assert maize["break_even_price_cash_ngn_per_kg"] == pytest.approx(4000.0 / 84.0, rel=1e-4)
+    assert maize["break_even_price_cash_ngn_per_kg"] < maize["break_even_price_total_ngn_per_kg"]
+    assert "equipment_unrated_count" in body
+
+
+def test_enterprise_zero_total_cost_gives_null_coverage(client):
+    # Fixture H: a crop with revenue but no recorded cost. Coverage of nothing
+    # is undefined — not 100 (reads as fully classified), not 0 (reads as
+    # nothing classified).
+    assert _post_crop_log(
+        client, activity_type="yield", crop="cowpea", amount=8000.0,
+        transaction_type="credit", quantity=5.0, unit="bags",
+    ).status_code == 201
+
+    cowpea = next(
+        c for c in client.get("/api/v1/dss/cost-structure").json()["crops"] if c["crop"] == "cowpea"
+    )
+    assert cowpea["total_recorded_cost"] == pytest.approx(0.0)
+    assert cowpea["classification_coverage_pct"] is None
+
+
+def test_enterprise_sensitivity_matrix_is_labelled_conditional(client):
+    _seed_fixture_a(client)
+    assert _post_drying(client, crop="maize", amount=0.0).status_code == 201
+
+    body = client.get("/api/v1/dss/sensitivity?crop=maize").json()
+    maize = body["crops"][0]
+    assert maize["conditional"] is True
+    assert [r["percentage"] for r in maize["rows"]] == [75, 90, 100, 110, 125]
+    at_100 = next(r for r in maize["rows"] if r["percentage"] == 100)
+    assert at_100["marketable_mass_kg"] == pytest.approx(84.0)
+    assert at_100["break_even_price_cash_ngn_per_kg"] == pytest.approx(4000.0 / 84.0, rel=1e-4)
+
+    # Caller-supplied percentages are honoured.
+    custom = client.get("/api/v1/dss/sensitivity?crop=maize&percentages=50&percentages=200").json()
+    assert [r["percentage"] for r in custom["crops"][0]["rows"]] == [50, 200]
+
+
+def test_enterprise_partial_budget_returns_a_negative_net_change(client):
+    # Stateless: four numbers in, net change out, nothing written.
+    resp = client.post(
+        "/api/v1/dss/partial-budget",
+        json={"added_revenue_ngn": 12000.0, "reduced_cost_ngn": 3000.0,
+              "lost_revenue_ngn": 0.0, "added_cost_ngn": 9500.0},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["net_change_ngn"] == pytest.approx(5500.0)
+
+    negative = client.post(
+        "/api/v1/dss/partial-budget",
+        json={"added_revenue_ngn": 4000.0, "reduced_cost_ngn": 1000.0,
+              "lost_revenue_ngn": 500.0, "added_cost_ngn": 9500.0},
+    )
+    assert negative.status_code == 200
+    # A negative result is a valid answer: the change is not worth making.
+    assert negative.json()["net_change_ngn"] == pytest.approx(-5000.0)
+
+    # The four inputs are non-negative by contract; the sign lives in which slot
+    # a quantity occupies, not in the number.
+    bad = client.post(
+        "/api/v1/dss/partial-budget",
+        json={"added_revenue_ngn": -1.0, "reduced_cost_ngn": 0.0,
+              "lost_revenue_ngn": 0.0, "added_cost_ngn": 0.0},
+    )
+    assert bad.status_code == 422
+
+    # It writes nothing: the ledger is untouched by an appraisal.
+    assert client.get("/api/v1/ledger/logs").json() == []
+
+
+def test_enterprise_yield_baseline_needs_three_seasons(client):
+    # A season is a calendar year of recorded yield. Two are not enough for an
+    # Olympic average, and a two-value mean is not one under another name.
+    for _ in range(2):
+        assert _post_crop_log(
+            client, activity_type="yield", crop="maize", amount=1000.0,
+            transaction_type="credit", quantity=12.0, unit="bags",
+        ).status_code == 201
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/yield-baseline").json()["crops"] if c["crop"] == "maize"
+    )
+    # Both logs land in the same calendar year, so this is ONE season, not two.
+    assert maize["n_seasons"] == 1
+    assert maize["olympic_average_kg"] is None
+    assert maize["reason"] is not None      # nulls travel with a reason, never bare
+    assert maize["grand_average_kg"] == pytest.approx(24.0)
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/api/v1/dss/cost-structure?crop=maize",
+        "/api/v1/dss/break-even-price?crop=maize",
+        "/api/v1/dss/sensitivity?crop=maize",
+        "/api/v1/dss/yield-baseline?crop=maize",
+    ],
+)
+def test_enterprise_routes_cross_farm_read_is_404(make_client, route):
+    # Fixture H: another farm's crop is simply "not found" — the same verdict
+    # every other resource gives, and no existence leak in either direction.
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    _seed_fixture_a(farm_a)
+
+    assert farm_a.get(route).status_code == 200
+    assert farm_b.get(route).status_code == 404
+
+    # Unfiltered, B sees its own (empty) farm rather than A's figures.
+    unfiltered = route.split("?")[0]
+    b_body = farm_b.get(unfiltered).json()
+    assert b_body["crops"] == []
+
+
+def test_enterprise_yield_baseline_mixed_units_is_null_with_a_reason(client):
+    # Same verdict get_decision_support gives for the same cause: quantities in
+    # two units cannot be summed, so no honest single baseline exists. Null with
+    # a stated reason, never a total that was never true.
+    assert _post_crop_log(
+        client, activity_type="yield", crop="maize", amount=1000.0,
+        transaction_type="credit", quantity=12.0, unit="bags",
+    ).status_code == 201
+    assert _post_crop_log(
+        client, activity_type="yield", crop="maize", amount=1000.0,
+        transaction_type="credit", quantity=100.0, unit="kg",
+    ).status_code == 201
+
+    maize = next(
+        c for c in client.get("/api/v1/dss/yield-baseline").json()["crops"] if c["crop"] == "maize"
+    )
+    assert maize["olympic_average_kg"] is None
+    assert maize["grand_average_kg"] is None      # not 112 across two units
+    assert maize["unit"] is None
+    assert "more than one unit" in maize["reason"]
+
+
+def test_enterprise_yield_baseline_reports_a_crop_with_no_yield(client):
+    # A crop with cost but no harvest recorded yet: both averages null, with the
+    # reason saying which of the two possible causes it is.
+    _seed_fixture_a(client)
+    maize = next(
+        c for c in client.get("/api/v1/dss/yield-baseline").json()["crops"] if c["crop"] == "maize"
+    )
+    assert maize["n_seasons"] == 0
+    assert maize["olympic_average_kg"] is None
+    assert maize["grand_average_kg"] is None
+    assert "No yield" in maize["reason"]
