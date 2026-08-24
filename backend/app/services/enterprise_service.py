@@ -20,11 +20,18 @@ Conventions:
 """
 from typing import Optional, Sequence
 
-from backend.app.schemas.schemas import CostBehaviour, cost_behaviour_for
+from ..schemas.schemas import CostBehaviour, cost_behaviour_for
 
 # The lookup is imported rather than re-declared: the taxonomy has exactly one
 # home (schemas.COST_BEHAVIOUR), and this module reads it. Importing the schema
 # constant is not database access and does not make these functions impure.
+#
+# RELATIVE, like every other import in this package. An absolute
+# `backend.app.schemas...` resolves under pytest, which runs from the repo root
+# with `backend` importable as a package, and fails under the container, whose
+# application root is the `app` directory and which has no `backend` module at
+# all. The test suite therefore could not catch it: the only environment that
+# reproduces it is the deployed one.
 
 
 # --- 4.1 Cost structure summary --------------------------------------------
