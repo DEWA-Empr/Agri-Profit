@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator, ValidationError
 from datetime import datetime
+from enum import Enum
 from typing import Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
 
@@ -89,6 +90,65 @@ class DryingParams(BaseModel):
         return self
 
 
+# --- Mechanisation: cost classification (enterprise economics, Phase 2) ------
+# Carried in the OperationalLog.extra_data JSON column for MECHANIZATION logs
+# only, by the same conditional mechanism DryingParams uses for BIOPROCESS (see
+# docs/adr/0001) — a cost taxonomy enforced at the schema edge on an existing
+# JSON column, so no ledger column and no migration.
+class CostBehaviour(str, Enum):
+    VARIABLE      = "VARIABLE"
+    SEMI_VARIABLE = "SEMI_VARIABLE"
+    FIXED         = "FIXED"
+
+
+class MechanizationParams(BaseModel):
+    cost_subtype: Literal["FUEL", "LUBRICANTS", "REPAIRS", "MACHINERY_HIRE", "DEPRECIATION"]
+    equipment_id: int | None = None
+    hours_used: float | None = Field(default=None, gt=0, le=1000)
+
+
+# TODO(cite): cost-behaviour classification follows standard enterprise-budget
+# practice (variable = scales with output; fixed = independent of output).
+# Cite an agricultural economics text or extension enterprise-budget guide
+# before submission. "The taxonomy was supplied" is not a citation.
+#
+# Keyed on (activity category, cost subtype) so a category that later gains a
+# subtype model of its own — LABOUR splitting into permanent and casual — is
+# added by replacing its single None-keyed row with one row per subtype, with no
+# change to the lookup. Categories absent here (YIELD, OTHER) are unclassified.
+COST_BEHAVIOUR: dict[tuple[str, str], CostBehaviour] = {
+    ("MECHANIZATION", "FUEL"):           CostBehaviour.VARIABLE,
+    ("MECHANIZATION", "LUBRICANTS"):     CostBehaviour.VARIABLE,
+    ("MECHANIZATION", "REPAIRS"):        CostBehaviour.SEMI_VARIABLE,
+    ("MECHANIZATION", "MACHINERY_HIRE"): CostBehaviour.VARIABLE,
+    ("MECHANIZATION", "DEPRECIATION"):   CostBehaviour.FIXED,
+    ("SEED",      None):                 CostBehaviour.VARIABLE,
+    ("FERTILIZER", None):                CostBehaviour.VARIABLE,
+    ("LABOUR",    None):                 CostBehaviour.VARIABLE,
+    ("BIOPROCESS", None):                CostBehaviour.VARIABLE,
+}
+
+
+def cost_behaviour_for(
+    activity_type: "Category | str",
+    cost_subtype: Optional[str] = None,
+) -> Optional[CostBehaviour]:
+    """Pure lookup: (activity category, cost subtype) -> CostBehaviour or None.
+
+    `None` means *unclassified* — the pair has no entry in COST_BEHAVIOUR, which
+    covers a mechanisation row carrying no subtype (every legacy row), and any
+    category outside the taxonomy. An unclassified row must stay unclassified:
+    never default it to VARIABLE, because a guessed classification is
+    indistinguishable from a recorded one in every figure derived from it, and
+    the coverage percentage exists precisely to keep the two apart.
+
+    Pure: no I/O, no session, no state. Category is normalised to the constant's
+    upper-case spelling; the enum's own values are lower-case.
+    """
+    category = activity_type.value if isinstance(activity_type, Category) else str(activity_type)
+    return COST_BEHAVIOUR.get((category.upper(), cost_subtype))
+
+
 # --- Operational Log Schemas ---
 class OperationalLogBase(BaseModel):
     activity_type: Category
@@ -103,18 +163,29 @@ class OperationalLogCreate(OperationalLogBase):
     financial_data: FinancialTransactionCreate
 
     @model_validator(mode="after")
-    def _validate_bioprocess_payload(self) -> "OperationalLogCreate":
-        # Structured validation applies ONLY to Bioprocess logs. Every other
-        # activity type keeps extra_data as an arbitrary, unvalidated dict —
-        # exactly as before. A Bioprocess log must carry a valid drying payload;
-        # a missing or malformed one is a 422 at the edge, never a 500 (the
-        # nested ValidationError is re-raised as a ValueError so Pydantic folds
-        # it into this model's own validation error).
+    def _validate_activity_payload(self) -> "OperationalLogCreate":
+        # Structured validation applies ONLY to the activity types named below.
+        # Every other activity type keeps extra_data as an arbitrary,
+        # unvalidated dict — exactly as before. Each nested ValidationError is
+        # re-raised as a ValueError so Pydantic folds it into this model's own
+        # validation error: a 422 at the edge, never a 500.
+        #
+        # A Bioprocess log must carry a valid drying payload; a missing or
+        # malformed one is rejected.
         if self.activity_type == Category.BIOPROCESS:
             try:
                 DryingParams.model_validate(self.extra_data)
             except ValidationError as exc:
                 raise ValueError(f"Invalid Bioprocess drying parameters: {exc}") from exc
+        # A Mechanization log MAY carry cost-classification parameters, and they
+        # are validated when present. extra_data is None on every legacy row and
+        # classification is opt-in, so absence is accepted and simply classifies
+        # as None — refusing it would break a shipped write path.
+        if self.activity_type == Category.MECHANIZATION and self.extra_data is not None:
+            try:
+                MechanizationParams.model_validate(self.extra_data)
+            except ValidationError as exc:
+                raise ValueError(f"Invalid Mechanization cost parameters: {exc}") from exc
         return self
 
 class OperationalLog(OperationalLogBase):

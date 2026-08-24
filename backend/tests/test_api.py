@@ -862,6 +862,83 @@ def test_non_bioprocess_log_keeps_arbitrary_extra_data(client):
     assert resp.json()["extra_data"] == arbitrary
 
 
+# --- Mechanisation cost classification: schema validation (Fixture H) ------
+# The taxonomy is enforced at the schema edge on the existing extra_data JSON
+# column: no ledger column, no migration. Validation is conditional on
+# activity_type == mechanization, exactly as drying validation is conditional on
+# bioprocess; every other activity type keeps extra_data arbitrary. Classifying
+# is opt-in, so a mechanisation log with no extra_data at all is still accepted
+# and is simply unclassified.
+
+def _valid_mechanization() -> dict:
+    """A well-formed mechanisation cost payload; each test below mutates exactly
+    one field so the 422 is attributable to that field alone."""
+    return {"cost_subtype": "FUEL", "equipment_id": 1, "hours_used": 4.5}
+
+
+def _post_mechanization(client, extra_data):
+    payload = {
+        "activity_type": "mechanization",
+        "description": "diesel for the ridger",
+        "crop": "maize",
+        "extra_data": extra_data,
+        "financial_data": {"amount": 3000.0, "transaction_type": "debit", "category": "mechanization"},
+    }
+    return client.post("/api/v1/ledger/logs", json=payload)
+
+
+def test_mechanization_valid_payload_accepted(client):
+    # Positive control: the baseline payload is accepted and stored intact, so a
+    # 422 below is caused by the mutation, not a broken baseline.
+    resp = _post_mechanization(client, _valid_mechanization())
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extra_data"]["cost_subtype"] == "FUEL"
+    assert resp.json()["extra_data"]["hours_used"] == 4.5
+
+
+def test_mechanization_unrecognised_cost_subtype_rejected(client):
+    # A subtype outside the taxonomy is rejected rather than silently stored as
+    # unclassified: a typo must not become a missing classification.
+    d = _valid_mechanization(); d["cost_subtype"] = "PETROL"
+    assert _post_mechanization(client, d).status_code == 422
+
+
+def test_mechanization_hours_used_out_of_range_rejected(client):
+    d = _valid_mechanization(); d["hours_used"] = 0        # must be > 0
+    assert _post_mechanization(client, d).status_code == 422
+    d = _valid_mechanization(); d["hours_used"] = 1001     # must be <= 1000
+    assert _post_mechanization(client, d).status_code == 422
+
+
+def test_non_mechanization_log_keeps_arbitrary_extra_data(client):
+    # The no-regression guarantee, restated for the cost taxonomy: a seed log
+    # carrying an arbitrary extra_data dict still succeeds and is stored
+    # unchanged. Mechanisation validation must never touch it.
+    arbitrary = {"cost_subtype": "NOT_A_REAL_SUBTYPE", "hours_used": -3, "free": [1, 2]}
+    payload = {
+        "activity_type": "seed",
+        "description": "arbitrary extra_data on a seed log",
+        "extra_data": arbitrary,
+        "financial_data": {"amount": 5000.0, "transaction_type": "debit", "category": "seed"},
+    }
+    resp = client.post("/api/v1/ledger/logs", json=payload)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extra_data"] == arbitrary
+
+
+def test_mechanization_without_extra_data_accepted_and_unclassified(client):
+    # Legacy rows carry no extra_data. Refusing them would break a shipped write
+    # path, so absence is accepted and classifies as None — never defaulted to
+    # VARIABLE, which would be indistinguishable from a recorded classification.
+    from backend.app.core.enums import Category
+    from backend.app.schemas.schemas import cost_behaviour_for
+
+    resp = _post_mechanization(client, None)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extra_data"] is None
+    assert cost_behaviour_for(Category.MECHANIZATION, None) is None
+
+
 # --- Bioprocess drying: read + aggregate endpoints (ticket 08, Phase 4) ----
 # Drying runs are created through the single existing write path
 # (POST /ledger/logs); the /bioprocess routes only read them back.
