@@ -31,7 +31,11 @@ export default defineConfig({
         // takes effect in a built/installed PWA, not `npm run dev`.
         runtimeCaching: [
           {
-            urlPattern: /\/api\/v1\/(ledger|reports|dss\/decision-support)/,
+            // The enterprise-economics reads are listed one by one rather than
+            // matched with a bare `dss/` prefix, so /dss/model and /dss/predict
+            // stay out: model metadata is not farm data and has no business in
+            // a cache that is purged on an auth change for tenant reasons.
+            urlPattern: /\/api\/v1\/(ledger|reports|dss\/(decision-support|cost-structure|break-even-price|sensitivity|yield-baseline))/,
             handler: 'StaleWhileRevalidate',
             method: 'GET',
             options: {

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { BrainCircuit, Play, BarChart3, Info, AlertTriangle } from 'lucide-react';
 import { dssService, type DssPrediction, type DssPredictInput, type DssModelInfo } from '../../lib/apiClient';
 import { colors } from '../../styles/theme';
+import { EnterpriseEconomics } from './components/EnterpriseEconomics';
 
 // Human labels + bounds for the three numeric model inputs. Bounds mirror the
 // backend (ml/dataset.BOUNDS) so the UI nudges users to valid ranges before
@@ -228,6 +229,11 @@ const DSSPredictPage = () => {
           </>
         )}
       </div>
+
+      {/* Tier 1, below the Tier-2 model and behind its own heading. See the
+          note at the top of EnterpriseEconomics for why the two are separated
+          rather than interleaved. */}
+      <EnterpriseEconomics card={card} />
     </div>
   );
 };

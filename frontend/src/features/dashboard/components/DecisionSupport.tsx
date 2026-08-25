@@ -87,13 +87,20 @@ const CropRow = ({ c }: { c: DssCropMetrics }) => {
             <span style={{ color: colors.textFaint }}>dried mass out of the dryer</span>
           </>
         )}
-        {/* Break-even is only rendered when the backend derived one. It is
-            retrospective — the price comes from realised revenue — so the
-            wording is past tense: what was needed, not what will be. */}
+        {/* Break-even YIELD, named in full. Only rendered when the backend
+            derived one. It is retrospective — the price comes from realised
+            revenue — so the wording is past tense: what was needed, not what
+            will be.
+
+            The full name is not decoration. The DSS view now carries two
+            CONDITIONAL break-even PRICES as well, and a farmer moving between
+            the two screens meets three distinct metrics that the bare word
+            "break-even" would collapse into one. Register finding P1-04 is that
+            failure already happening once in this project. */}
         {c.break_even_yield != null && (
           <>
             <br />
-            Break-even was {c.break_even_yield.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+            Break-even yield was {c.break_even_yield.toLocaleString(undefined, { maximumFractionDigits: 1 })}
             {c.break_even_unit ? ` ${c.break_even_unit}` : ''} at the price you got
           </>
         )}

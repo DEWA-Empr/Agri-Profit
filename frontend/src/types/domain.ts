@@ -138,6 +138,121 @@ export interface DssDecisionSupport {
   overall: { revenue: number; expenses: number; gross_margin: number };
 }
 
+// --- Enterprise economics (GET /dss/cost-structure, /break-even-price,
+// /sensitivity, POST /dss/partial-budget) ---
+// Mirrors backend schemas.CostStructure and friends. Every figure here is
+// derived from the farm's own ledger at read time; none of it is stored, and
+// none of it comes from the Tier-2 yield model.
+
+export interface CostStructure {
+  variable_cost: number;
+  // Its own line, never folded into the variable pool. Repairs are genuinely
+  // semi-variable and the reader has to be able to see the assumption — though
+  // it IS part of cash_cost for the computation.
+  semi_variable_cost: number;
+  // A DEPRECIATION row actually posted to the ledger. Distinct from the
+  // allocated-fixed overlay below, which is never a ledger entry.
+  fixed_cost_recorded: number;
+  // Cost carrying no Cost Subtype. Never defaulted into a behaviour bucket.
+  unclassified_cost: number;
+  total_recorded_cost: number;
+  cash_cost: number;
+  // null when nothing is recorded — NOT 100 and NOT 0. There is no coverage of
+  // nothing, and a vacuous 100 would read as "fully classified".
+  classification_coverage_pct?: number | null;
+  revenue_ngn: number;
+  cash_operating_cost_ngn: number;
+  // null at zero revenue: an input-only crop has no revenue for its cost to be
+  // a proportion of. Not infinite, not zero.
+  operating_expense_ratio_pct?: number | null;
+}
+
+export interface CropCostStructure extends CostStructure {
+  crop: string;
+}
+
+export interface CostStructureResponse {
+  crops: CropCostStructure[];
+  farm: CostStructure;
+}
+
+// "derived" — the window is the span of the farm's own ledger, and widens with
+// every new log. "specified" — the caller pinned it. The distinction travels
+// with the figures because a price computed over a derived window cannot be
+// re-derived after the next entry.
+export type PeriodSource = 'derived' | 'specified';
+
+export interface CropBreakEvenPrice {
+  crop: string;
+  // The two prices do NOT share a cost base, and the field names say so. The
+  // cash figure is classified variable + semi-variable cost only; the total
+  // figure is every recorded cost (unclassified included) plus the allocated
+  // fixed overlay. Both null where the crop has no marketable mass.
+  break_even_price_cash_ngn_per_kg?: number | null;
+  break_even_price_total_ngn_per_kg?: number | null;
+  variable_and_semi_variable_cost_ngn: number;
+  total_recorded_cost_ngn: number;
+  allocated_fixed_ngn?: number | null;
+  total_cost_ngn: number;
+  marketable_mass_kg?: number | null;
+  classification_coverage_pct?: number | null;
+}
+
+export interface BreakEvenPriceResponse {
+  crops: CropBreakEvenPrice[];
+  period_days: number;
+  period_source: PeriodSource;
+  period_fixed_cost_ngn: number;
+  equipment_count: number;
+  // Assets carrying no depreciation rate. Non-zero means the overlay above is
+  // PARTIAL, and saying so is what stops it being read as a small true fixed
+  // cost.
+  equipment_unrated_count: number;
+  total_direct_cost_all_crops: number;
+}
+
+export interface SensitivityRow {
+  percentage: number;
+  marketable_mass_kg?: number | null;
+  break_even_price_cash_ngn_per_kg?: number | null;
+  break_even_price_total_ngn_per_kg?: number | null;
+}
+
+export interface CropSensitivity {
+  crop: string;
+  // Always true from this endpoint, and carried rather than assumed: the matrix
+  // answers "if you harvest this much, what price covers your costs". It
+  // forecasts neither yield nor price, and the interface must say so.
+  conditional: boolean;
+  baseline_marketable_mass_kg?: number | null;
+  cash_cost_ngn: number;
+  total_cost_ngn: number;
+  rows: SensitivityRow[];
+}
+
+export interface SensitivityResponse {
+  crops: CropSensitivity[];
+  period_days: number;
+  period_source: PeriodSource;
+}
+
+// Four quantities, all non-negative: the sign of the appraisal lives in which
+// slot a quantity occupies, never in the number itself.
+export interface PartialBudgetRequest {
+  added_revenue_ngn: number;
+  reduced_cost_ngn: number;
+  lost_revenue_ngn: number;
+  added_cost_ngn: number;
+}
+
+export interface PartialBudgetResponse extends PartialBudgetRequest {
+  benefits_ngn: number;
+  costs_ngn: number;
+  // Signed and unclamped. A negative net change is a valid and useful answer —
+  // it says the change is not worth making — and is never suppressed.
+  net_change_ngn: number;
+}
+
 // --- Bioprocess: post-harvest drying (ticket 08) ---
 // A drying run is an OperationalLog with activity_type 'bioprocess' whose
 // extra_data carries a DryingParams payload. There is no separate create

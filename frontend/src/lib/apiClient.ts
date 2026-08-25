@@ -16,6 +16,11 @@ import type {
   InvestorReport,
   BioprocessDetail,
   BioprocessSummary,
+  CostStructureResponse,
+  BreakEvenPriceResponse,
+  SensitivityResponse,
+  PartialBudgetRequest,
+  PartialBudgetResponse,
 } from '../types/domain';
 import { getToken, clearToken } from './authToken';
 
@@ -150,6 +155,23 @@ export const dssService = {
   getModel: () => api.get<DssModelInfo>('/dss/model'),
   // Tier 1: deterministic per-crop metrics computed from the real ledger.
   getDecisionSupport: () => api.get<DssDecisionSupport>('/dss/decision-support'),
+
+  // --- Enterprise economics ------------------------------------------------
+  // All three reads are fetched UNFILTERED and the crop is chosen on the
+  // client. Filtering server-side would mean a request per crop switch, and
+  // these are the screens most likely to be read on a poor link; one payload
+  // that the offline cache can serve whole is worth more than a narrower one
+  // fetched five times. The farm-wide figures on the cost structure are
+  // computed over every crop regardless of the filter in any case.
+  getCostStructure: () => api.get<CostStructureResponse>('/dss/cost-structure'),
+  getBreakEvenPrice: () => api.get<BreakEvenPriceResponse>('/dss/break-even-price'),
+  getSensitivity: () => api.get<SensitivityResponse>('/dss/sensitivity'),
+
+  // Stateless: four numbers in, a signed net change out. It reads no ledger row
+  // and writes nothing, which is why the form that calls it can fall back to
+  // computing the same arithmetic on the device when there is no network.
+  partialBudget: (data: PartialBudgetRequest) =>
+    api.post<PartialBudgetResponse>('/dss/partial-budget', data),
 };
 
 export const reportsService = {
