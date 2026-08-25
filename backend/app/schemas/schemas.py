@@ -102,6 +102,35 @@ class CostBehaviour(str, Enum):
 
 
 class MechanizationParams(BaseModel):
+    """Cost classification carried on a MECHANIZATION log's extra_data.
+
+    ONLY `cost_subtype` drives a derived figure. It is the key
+    `cost_behaviour_for` looks up, so it decides which bucket the row's money
+    lands in and therefore every cost-structure, break-even and sensitivity
+    number downstream.
+
+    `equipment_id` and `hours_used` are CAPTURE-ONLY, deliberately and as
+    specified. Nothing reads them: the depreciation overlay is driven by the
+    Equipment rows' own `purchase_price` and `depreciation_rate`
+    (enterprise_service.depreciation_overlay), not by a log naming an asset, and
+    no machine-hour rate, utilisation figure or cost-per-hour metric exists in
+    this platform's glossary (CONTEXT.md), in ADR-0001/0002, or in the
+    enterprise-economics ticket.
+
+    The audit (docs/STATE_REPORT_2026-08-25.md §10.3) flagged the absence of a
+    consumer. It is settled in docs/adr/0003 rather than resolved either way,
+    because both resolutions would be wrong: inventing a machine-hour costing
+    metric would fabricate domain arithmetic no specification defines, and
+    deleting the fields would drop behaviour the specification does require —
+    the bounds on `hours_used` are a named test case, and the seed script
+    populates `equipment_id` on five of its mechanisation logs and `hours_used`
+    on three.
+
+    So they are validated and stored, and that is the whole of their contract.
+    `test_mechanization_params_are_captured_and_round_trip_intact` pins it, so
+    the capture is verified rather than merely present, and a future ticket that
+    does define a consumer starts from recorded data rather than from nothing.
+    """
     cost_subtype: Literal["FUEL", "LUBRICANTS", "REPAIRS", "MACHINERY_HIRE", "DEPRECIATION"]
     equipment_id: int | None = None
     hours_used: float | None = Field(default=None, gt=0, le=1000)

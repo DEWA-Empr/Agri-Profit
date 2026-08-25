@@ -21,6 +21,7 @@ import type {
   SensitivityResponse,
   PartialBudgetRequest,
   PartialBudgetResponse,
+  YieldBaselineResponse,
 } from '../types/domain';
 import { getToken, clearToken } from './authToken';
 import { purgeApiReadCache } from './apiCache';
@@ -185,6 +186,10 @@ export interface DssModelInfo {
   target?: string;
   target_unit?: string;
   trained_at?: string;
+  // The crops the model was trained on. Absent while untrained — the endpoint
+  // reports {"trained": false} and nothing else, rather than an empty list that
+  // would read as "no crops" instead of "no model".
+  crops?: string[];
 }
 
 // Predict request: three numeric field conditions plus the crop to forecast.
@@ -213,6 +218,9 @@ export const dssService = {
   getCostStructure: () => api.get<CostStructureResponse>('/dss/cost-structure'),
   getBreakEvenPrice: () => api.get<BreakEvenPriceResponse>('/dss/break-even-price'),
   getSensitivity: () => api.get<SensitivityResponse>('/dss/sensitivity'),
+  // Olympic and grand average yield per crop. Fetched unfiltered like its three
+  // neighbours, and cached by the same service-worker rule (vite.config.ts).
+  getYieldBaseline: () => api.get<YieldBaselineResponse>('/dss/yield-baseline'),
 
   // Stateless: four numbers in, a signed net change out. It reads no ledger row
   // and writes nothing, which is why the form that calls it can fall back to

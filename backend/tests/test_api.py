@@ -222,6 +222,87 @@ def test_idempotent_log_creation(client):
     assert transactions.status_code == 200
     assert len(transactions.json()) == 1
 
+# --- client_id: uniqueness is farm-scoped, like the idempotency that reads it ---
+#
+# Regression for docs/STATE_REPORT_2026-08-25.md Section 9.14. The unique index
+# on client_id was global (initial schema 544b85dc2d20, written before farm_id
+# existed) while _find_by_client_id has always matched within one farm. Farm B
+# reusing farm A's key violated the index, missed the farm-scoped recovery
+# lookup, hit the bare `raise` in ledger_service, and came back as a 500.
+# Migration e6a2b4c7d130 scopes the constraint to (farm_id, client_id).
+
+
+def test_same_client_id_in_two_farms_creates_two_records(make_client):
+    """The exact failure case: two farms, one shared client_id, no 500."""
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    shared = "seed-bioprocess-yield-0001"  # the seed script's fixed key shape
+
+    first = _post_log(farm_a, activity_type="seed", amount=5000.0,
+                      transaction_type="debit", client_id=shared)
+    assert first.status_code == 201, first.text
+
+    second = _post_log(farm_b, activity_type="seed", amount=7000.0,
+                       transaction_type="debit", client_id=shared)
+    # A genuine creation for farm B, not a 500 and not farm A's row handed back.
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] != first.json()["id"]
+
+
+def test_cross_farm_client_id_does_not_leak_the_other_farms_row(make_client):
+    """Each farm sees exactly its own record, with its own amount."""
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    shared = "shared-offline-key-0001"
+
+    _post_log(farm_a, activity_type="seed", amount=5000.0,
+              transaction_type="debit", client_id=shared)
+    _post_log(farm_b, activity_type="seed", amount=7000.0,
+              transaction_type="debit", client_id=shared)
+
+    a_logs = farm_a.get("/api/v1/ledger/logs").json()
+    b_logs = farm_b.get("/api/v1/ledger/logs").json()
+    assert len(a_logs) == 1
+    assert len(b_logs) == 1
+    assert a_logs[0]["id"] != b_logs[0]["id"]
+    assert a_logs[0]["financial_transaction"]["amount"] == 5000.0
+    assert b_logs[0]["financial_transaction"]["amount"] == 7000.0
+
+
+def test_farm_scoped_idempotency_still_holds_after_the_constraint_change(make_client):
+    """Widening the constraint must not widen idempotency: a replay within one
+    farm is still 200-and-the-same-row, and it stays that way once a second farm
+    holds the same key."""
+    farm_a = make_client(farm_name="Farm A")
+    farm_b = make_client(farm_name="Farm B")
+    shared = "replay-across-tenants-0001"
+
+    created = _post_log(farm_a, activity_type="seed", amount=5000.0,
+                        transaction_type="debit", client_id=shared)
+    assert created.status_code == 201
+
+    _post_log(farm_b, activity_type="seed", amount=7000.0,
+              transaction_type="debit", client_id=shared)
+
+    replay = _post_log(farm_a, activity_type="seed", amount=5000.0,
+                       transaction_type="debit", client_id=shared)
+    assert replay.status_code == 200
+    assert replay.json()["id"] == created.json()["id"]
+    # And no duplicate was booked on either side.
+    assert len(farm_a.get("/api/v1/ledger/logs").json()) == 1
+    assert len(farm_b.get("/api/v1/ledger/logs").json()) == 1
+
+
+def test_a_null_client_id_is_exempt_from_the_composite_constraint(client):
+    """Most logs carry no client_id at all. NULLs never compare equal, so any
+    number of them coexist in one farm — a UNIQUE(farm_id, client_id) that
+    collapsed them would break every non-offline write."""
+    for _ in range(3):
+        assert _post_log(client, activity_type="seed", amount=100.0,
+                         transaction_type="debit").status_code == 201
+    assert len(client.get("/api/v1/ledger/logs").json()) == 3
+
+
 def test_maintenance_for_missing_equipment_returns_404(client):
     payload = {"equipment_id": 999999, "description": "Service on a ghost", "cost": 100.0}
     response = client.post("/api/v1/equipment/maintenance", json=payload)
@@ -954,6 +1035,39 @@ def test_mechanization_valid_payload_accepted(client):
     assert resp.status_code == 201, resp.text
     assert resp.json()["extra_data"]["cost_subtype"] == "FUEL"
     assert resp.json()["extra_data"]["hours_used"] == 4.5
+
+
+def test_mechanization_params_are_captured_and_round_trip_intact(client):
+    """equipment_id and hours_used are capture-only fields with no consumer
+    (see MechanizationParams and docs/STATE_REPORT_2026-08-25.md Section 10.3).
+    Their whole contract is that they are validated and persisted unchanged, so
+    that is what is pinned here — including that they survive a read-back rather
+    than only a create response, and that cost_subtype is the ONLY one of the
+    three that moves a derived figure."""
+    resp = _post_mechanization(client, _valid_mechanization())
+    assert resp.status_code == 201, resp.text
+    log_id = resp.json()["id"]
+
+    stored = next(l for l in client.get("/api/v1/ledger/logs").json() if l["id"] == log_id)
+    assert stored["extra_data"] == {"cost_subtype": "FUEL", "equipment_id": 1, "hours_used": 4.5}
+
+    # And the cost structure is driven by cost_subtype alone: FUEL is VARIABLE,
+    # so the row's money is in the variable bucket and fully classified. Neither
+    # equipment_id nor hours_used appears anywhere in the derived response.
+    body = client.get("/api/v1/dss/cost-structure?crop=maize").json()
+    crop = body["crops"][0]
+    assert crop["variable_cost"] == 3000.0
+    assert crop["classification_coverage_pct"] == 100.0
+    assert "equipment_id" not in str(body)
+    assert "hours_used" not in str(body)
+
+
+def test_mechanization_omitting_the_capture_only_fields_is_accepted(client):
+    """Both are optional. A farmer classifying a cost without naming an asset or
+    counting hours must not be forced to invent either."""
+    resp = _post_mechanization(client, {"cost_subtype": "MACHINERY_HIRE"})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extra_data"] == {"cost_subtype": "MACHINERY_HIRE"}
 
 
 def test_mechanization_unrecognised_cost_subtype_rejected(client):

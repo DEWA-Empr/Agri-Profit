@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Text, JSON, Boolean
+from sqlalchemy import (
+    Column, Integer, String, Float, DateTime, ForeignKey, Enum, Text, JSON, Boolean,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..core.enums import Category, TransactionType
@@ -61,6 +64,12 @@ class ShareToken(Base):
 
 class OperationalLog(Base):
     __tablename__ = "operational_logs"
+    __table_args__ = (
+        # Idempotency is per tenant, so uniqueness is too. NULL client_ids are
+        # exempt in both Postgres and SQLite (NULLs are never equal), which is
+        # what lets every non-offline log leave the column empty.
+        UniqueConstraint("farm_id", "client_id", name="uq_operational_logs_farm_client"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     # Owning tenant. NOT NULL: every log is stamped with the author's farm at
@@ -80,7 +89,15 @@ class OperationalLog(Base):
     # of the Tier-1 decision-support report. Indexed for per-crop grouping.
     crop = Column(String, nullable=True, index=True)
 
-    client_id = Column(String, unique=True, nullable=True, index=True)
+    # Client-generated idempotency key for offline writes. Unique PER FARM, not
+    # globally: `ledger_service._find_by_client_id` has always matched a replay
+    # within the author's own farm, and a global unique index contradicted that
+    # — two farms using the same key (the seed script's fixed keys, or any two
+    # devices that agree on a scheme) collided at the index, missed the
+    # farm-scoped recovery lookup, and surfaced as a 500. The global index
+    # predates tenancy: it was written in 544b85dc2d20, before farm_id existed.
+    # See migration e6a2b4c7d130.
+    client_id = Column(String, nullable=True, index=True)
 
     # Reversal link (ticket 10): a reversing entry points at the log it offsets
     # (self-referential FK). Ledger records are immutable — a mistaken log is

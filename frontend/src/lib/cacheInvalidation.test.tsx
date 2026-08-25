@@ -5,10 +5,11 @@ import api, { dssService, ledgerService } from './apiClient'
 import { saveOperationalLog } from './logs'
 import { flushPendingLogs } from './sync'
 import { API_READ_CACHE } from './apiCacheConfig'
+import { setToken, clearToken } from './authToken'
 import type { PendingLog } from './db'
 import type {
   BreakEvenPriceResponse, CostStructureResponse, DssDecisionSupport, Equipment,
-  MaintenanceLog, OperationalLogCreate, SensitivityResponse,
+  MaintenanceLog, OperationalLogCreate, SensitivityResponse, YieldBaselineResponse,
 } from '../types/domain'
 import { EnterpriseEconomics } from '../features/dss/components/EnterpriseEconomics'
 import { MaintenancePanel } from '../features/equipment/components/MaintenancePanel'
@@ -152,12 +153,30 @@ const sensitivity = (): SensitivityResponse => {
   }
 }
 
+// EnterpriseEconomics fetches all four ledger reads in one Promise.all, so this
+// stand-in has to answer the yield baseline too or the whole panel group falls
+// into its failure branch. Static: no test here mutates a yield, and the panel
+// this file exercises is the break-even one.
+const yieldBaseline = (): YieldBaselineResponse => ({
+  crops: [{
+    crop: 'maize',
+    olympic_average_kg: null,
+    grand_average_kg: 100,
+    n_seasons: 1,
+    n_used: 0,
+    n_discarded: 0,
+    unit: 'kg',
+    reason: 'An Olympic average needs at least 3 seasons; this crop has 1. The grand average is shown instead.',
+  }],
+})
+
 function route(method: string, url: string, body: unknown): unknown {
   if (method === 'get') {
     if (url.endsWith('/dss/decision-support')) return decisionSupport()
     if (url.endsWith('/dss/cost-structure')) return costStructure()
     if (url.endsWith('/dss/break-even-price')) return breakEvenPrice()
     if (url.endsWith('/dss/sensitivity')) return sensitivity()
+    if (url.endsWith('/dss/yield-baseline')) return yieldBaseline()
     if (url.endsWith('/equipment/')) return server.equipment
     const forEquipment = /\/equipment\/(\d+)\/maintenance$/.exec(url)
     if (forEquipment) return server.maintenance.filter((log) => log.equipment_id === Number(forEquipment[1]))
@@ -233,8 +252,23 @@ const { rows, pendingLogs } = vi.hoisted(() => {
     rows,
     pendingLogs: {
       add: async (row: PendingLog) => { rows.push({ ...row, id: rows.length + 1 }) },
-      where: (field: 'status') => ({
-        equals: (value: string) => ({ toArray: async () => rows.filter((row) => row[field] === value) }),
+      // Matches the owner-scoped shapes sync.ts uses (see lib/queueOwner).
+      where: (index: string) => ({
+        equals: (value: string | string[]) => {
+          const select = () =>
+            index === '[ownerKey+status]'
+              ? rows.filter((row) => row.ownerKey === value[0] && row.status === value[1])
+              : rows.filter((row) => row.ownerKey === value)
+          return {
+            toArray: async () => select(),
+            count: async () => select().length,
+            delete: async () => {
+              const doomed = new Set(select())
+              for (let i = rows.length - 1; i >= 0; i--) if (doomed.has(rows[i])) rows.splice(i, 1)
+              return doomed.size
+            },
+          }
+        },
       }),
       delete: async (id: number) => {
         const index = rows.findIndex((row) => row.id === id)
@@ -262,7 +296,15 @@ const bodyText = () => document.body.textContent?.replace(/\s+/g, ' ') ?? ''
 
 const originalAdapter = api.defaults.adapter
 
+// A signed-in session. The queue is partitioned by the token's `sub`
+// (lib/queueOwner), so without a token there is no owner and the flush
+// correctly declines to touch anything — which would make this file's flush
+// test pass for the wrong reason.
+const TEST_TOKEN = `${btoa('{"alg":"HS256"}')}.${btoa('{"sub":"26"}')}.sig`
+const OWNER = 'user:26'
+
 beforeEach(() => {
+  setToken(TEST_TOKEN)
   swCache.clear()
   server.logs.length = 0
   server.equipment.length = 0
@@ -273,6 +315,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  clearToken()
   cleanup()
   vi.unstubAllGlobals()
   api.defaults.adapter = originalAdapter
@@ -297,8 +340,8 @@ describe('a log write invalidates the cached derived reads', () => {
 describe('an offline queue flush invalidates the cached derived reads', () => {
   it('serves every flushed record on the next DSS read', async () => {
     rows.push(
-      { id: 1, clientId: 'a', payload: seedLog(3500), status: 'pending', failCount: 0, createdAt: 1 },
-      { id: 2, clientId: 'b', payload: seedLog(2000), status: 'pending', failCount: 0, createdAt: 2 },
+      { id: 1, ownerKey: OWNER, clientId: 'a', payload: seedLog(3500), status: 'pending', failCount: 0, createdAt: 1 },
+      { id: 2, ownerKey: OWNER, clientId: 'b', payload: seedLog(2000), status: 'pending', failCount: 0, createdAt: 2 },
     )
     expect((await dssService.getDecisionSupport()).data.crops[0].expenses).toBe(0)
 

@@ -2,6 +2,8 @@ import { useState, type CSSProperties, type FormEvent } from 'react';
 import { Save } from 'lucide-react';
 import type { Category, TransactionType, OperationalLogCreate } from '../../types/domain';
 import { saveOperationalLog } from '../../lib/logs';
+import { useCropOptions } from './useCropOptions';
+import { normaliseCrop } from './cropOptions';
 import { colors } from '../../styles/theme';
 import { DryingFields } from './DryingFields';
 import { buildDryingParams, emptyDryingForm, type DryingForm } from './dryingParams';
@@ -25,10 +27,10 @@ const CATEGORIES: { value: Category; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
-// Crops the deterministic DSS groups by (mirrors the yield model's crops). A
-// record's crop drives the per-crop unit-cost / gross-margin panel; leaving it
-// blank files the record under "Unspecified" there.
-const CROPS = ['maize', 'rice', 'sorghum', 'soybean', 'cassava'];
+// The crop list is no longer a literal here: it is assembled from the farm's own
+// recorded crops and the predictor's, at runtime. See ./cropOptions for why, and
+// for the cowpea/tomato drift the literal caused.
+const OTHER_CROP = '__other__';
 
 // Harvest units, fixed rather than free text. Yield totals are grouped by unit
 // on the backend, and free text meant "kg", "Kg" and "kilos" became three
@@ -68,8 +70,18 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
   // that matter (water removed, process loss, safe-storage verdict) only exist
   // after the backend has seen the run.
   const [savedDryingId, setSavedDryingId] = useState<number | null>(null);
+  // Crops come from the API, not a literal (see ./cropOptions). `otherCrop`
+  // holds a name being typed for a crop the farm has not recorded before —
+  // without it, a farmer taking up a new crop this season could not file a
+  // record against it at all.
+  const [otherCrop, setOtherCrop] = useState('');
+  const { crops: cropOptions, loading: cropsLoading } = useCropOptions();
 
   const isDrying = form.activity_type === 'bioprocess';
+  const isOtherCrop = form.crop === OTHER_CROP;
+  // Normalised at the edge so "Maize", " maize" and "maize" are one crop. Crop
+  // grouping in the DSS is an exact string match on this column.
+  const resolvedCrop = isOtherCrop ? normaliseCrop(otherCrop) : form.crop;
 
   const setActivity = (value: Category) =>
     // Re-default the debit/credit choice to match the new activity (still overridable).
@@ -96,7 +108,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
 
     const payload: Omit<OperationalLogCreate, 'client_id'> = {
       activity_type: form.activity_type,
-      crop: form.crop || undefined,
+      crop: resolvedCrop || undefined,
       description: form.description || undefined,
       quantity: form.quantity ? parseFloat(form.quantity) : undefined,
       unit: form.unit || undefined,
@@ -125,6 +137,10 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
         ? 'Saved offline — drying metrics will be available once it syncs.'
         : 'Saved offline — will sync when connected.');
       onSaved();
+    } else if (result.status === 'unauthenticated') {
+      // Nothing was queued: an offline record has to name the account that
+      // captured it (lib/queueOwner), and there is no signed-in account to name.
+      setMessage('Your session has ended. Sign in again, then re-enter this record.');
     } else {
       setMessage('Network error — saved offline. Will retry when connected.');
       onSaved();
@@ -154,9 +170,22 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
         <div>
           <label style={label}>Crop</label>
           <select value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} style={field}>
-            <option value="">Unspecified</option>
-            {CROPS.map((c) => <option key={c} value={c} style={{ textTransform: 'capitalize' }}>{c[0].toUpperCase() + c.slice(1)}</option>)}
+            <option value="">{cropsLoading ? 'Loading crops…' : 'Unspecified'}</option>
+            {cropOptions.map((c) => (
+              <option key={c} value={c} style={{ textTransform: 'capitalize' }}>{c[0].toUpperCase() + c.slice(1)}</option>
+            ))}
+            <option value={OTHER_CROP}>Another crop…</option>
           </select>
+          {isOtherCrop && (
+            <input
+              type="text"
+              placeholder="Crop name, e.g. groundnut"
+              value={otherCrop}
+              onChange={(e) => setOtherCrop(e.target.value)}
+              aria-label="New crop name"
+              style={{ ...field, marginTop: '6px' }}
+            />
+          )}
         </div>
         <div>
           <label style={label}>Type</label>

@@ -3,6 +3,7 @@ import type { FC, ReactNode } from 'react';
 import { authService, setUnauthorizedHandler } from '../../lib/apiClient';
 import { getToken, setToken as persistToken, clearToken } from '../../lib/authToken';
 import { purgeApiReadCache } from '../../lib/apiCache';
+import { purgeQueueForCurrentOwner } from '../../lib/sync';
 import { AuthContext, type AuthContextValue } from './useAuth';
 
 // Auth state for the whole app. The token lives in localStorage (see
@@ -23,6 +24,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const logout = useCallback(() => {
     // Clear this farm's cached reads so they can't be served to the next account.
     void purgeApiReadCache();
+    // And its unsent writes, BEFORE the token goes: the purge identifies the
+    // owner from the token, so clearing the token first would leave it with
+    // nothing to match and the rows behind (see lib/sync).
+    //
+    // Note this is fire-and-forget, exactly as the read-cache purge is. The
+    // queue is additionally owner-scoped on every read, so even if this purge
+    // never lands, the rows are inert for every other account.
+    void purgeQueueForCurrentOwner();
     clearToken();
     setTokenState(null);
   }, []);

@@ -40,6 +40,9 @@ export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCou
       onSaved();
     } else if (result.status === 'offline') {
       setSaveMessage('Saved offline — will sync when connected.');
+    } else if (result.status === 'unauthenticated') {
+      // Nothing was queued — see FarmRecordCreateForm for why.
+      setSaveMessage('Your session has ended. Sign in again, then re-enter this record.');
     } else {
       setSaveMessage('Network error — saved offline. Will retry when connected.');
     }

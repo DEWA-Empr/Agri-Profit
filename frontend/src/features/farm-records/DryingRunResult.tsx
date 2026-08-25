@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Droplets, HelpCircle } from 'lucide-react';
 import { bioprocessService } from '../../lib/apiClient';
 import type { BioprocessDetail } from '../../types/domain';
@@ -8,6 +8,13 @@ import { colors } from '../../styles/theme';
 // is computed server-side on read (GET /bioprocess/{id}) from the parameters
 // entered — nothing is stored, and nothing is recomputed in the browser, so the
 // figures a farmer sees are the same ones the DSS uses.
+
+// Lazy, like the dashboard's charts: recharts is by far the heaviest thing on
+// this route, and a farmer entering a seed cost should not download a charting
+// library to do it. The chunk arrives only when a drying run is actually shown.
+const DryingCurveChart = lazy(() =>
+  import('./DryingCurveChart').then((m) => ({ default: m.DryingCurveChart })),
+);
 
 const kg = (n: number) => `${n.toFixed(2)} kg`;
 const pct = (n: number) => `${n.toFixed(2)}%`;
@@ -65,6 +72,7 @@ export const DryingRunResult = ({ logId, onDone }: { logId: number; onDone: () =
   }
 
   const m = detail.metrics;
+  const p = detail.params;
 
   return (
     <div style={card} className="fade-in-up">
@@ -94,6 +102,30 @@ export const DryingRunResult = ({ logId, onDone }: { logId: number; onDone: () =
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(160,92,0,0.07)', color: colors.warn, borderRadius: '8px', padding: '10px 12px', fontSize: '11px' }}>
           <AlertTriangle size={15} />
           Process loss is over 5% of the predicted outlet mass. Check the weights and moisture readings — this is usually a measurement problem, not lost grain.
+        </div>
+      )}
+
+      {/* The drying curve, when there is one to draw. With no intermediate
+          readings the only points are the run's start and end, and joining two
+          points would draw a straight line that asserts a linear fall nobody
+          measured — so the panel says what is missing instead of drawing it.
+          Same rule as the Page fit hint below. */}
+      {(p.readings?.length ?? 0) > 0 ? (
+        <div>
+          <div style={{ fontSize: '10px', fontWeight: 600, color: colors.labelText, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' }}>
+            Drying curve · measured
+          </div>
+          <Suspense fallback={<div style={{ height: 190, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: colors.textMuted }}>Loading chart…</div>}>
+            <DryingCurveChart params={p} />
+          </Suspense>
+          <div style={{ fontSize: '10px', color: colors.textFaint, marginTop: '2px' }}>
+            Start, your {p.readings!.length} reading{p.readings!.length === 1 ? '' : 's'}, and the final moisture — measured points only, no fitted model.
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: colors.textMuted, background: colors.surfaceMuted, border: `0.5px solid ${colors.border}`, borderRadius: '10px', padding: '12px', lineHeight: 1.5 }}>
+          No drying curve: this run has no intermediate moisture readings. Add a reading each time you check the
+          meter and the curve — and the Page-model fit — appear here.
         </div>
       )}
 

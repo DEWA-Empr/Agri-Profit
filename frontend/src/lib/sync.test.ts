@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { flushPendingLogs, retryFailedLogs, registerSyncListener } from './sync'
+import { flushPendingLogs, retryFailedLogs, registerSyncListener, purgeQueueForCurrentOwner } from './sync'
 import { ledgerService } from './apiClient'
 import type { PendingLog } from './db'
 
@@ -16,12 +16,26 @@ import type { PendingLog } from './db'
 // below is itself hoisted above the imports and has to close over it.
 const { rows, pendingLogs } = vi.hoisted(() => {
   const rows: PendingLog[] = []
+  // Matches the three query shapes sync.ts uses and nothing else:
+  //   where('[ownerKey+status]').equals([owner, status]).toArray()
+  //   where('ownerKey').equals(owner).delete()
+  // plus the by-id delete/update below.
+  const select = (index: string, value: string | string[]) =>
+    index === '[ownerKey+status]'
+      ? rows.filter((row) => row.ownerKey === value[0] && row.status === value[1])
+      : rows.filter((row) => row.ownerKey === value)
   return {
     rows,
     pendingLogs: {
-      where: (field: 'status') => ({
-        equals: (value: string) => ({
-          toArray: async () => rows.filter((row) => row[field] === value),
+      where: (index: string) => ({
+        equals: (value: string | string[]) => ({
+          toArray: async () => select(index, value),
+          count: async () => select(index, value).length,
+          delete: async () => {
+            const doomed = new Set(select(index, value))
+            for (let i = rows.length - 1; i >= 0; i--) if (doomed.has(rows[i])) rows.splice(i, 1)
+            return doomed.size
+          },
         }),
       }),
       delete: async (id: number) => {
@@ -37,6 +51,14 @@ const { rows, pendingLogs } = vi.hoisted(() => {
 })
 
 vi.mock('./db', () => ({ db: { pendingLogs } }))
+
+// The signed-in account, swappable per test. sync.ts reads it on every queue
+// access, which is the whole point of the owner partition.
+const { ownerState } = vi.hoisted(() => ({ ownerState: { key: null as string | null } }))
+vi.mock('./queueOwner', () => ({ currentOwnerKey: () => ownerState.key }))
+
+const FARM_A = 'user:1'
+const FARM_B = 'user:2'
 
 // The queue posts through the shared axios client, which throws on non-2xx.
 // Mocking it is what lets "server down" be expressed as a rejected promise.
@@ -54,15 +76,18 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 let nextId = 1
 
+const basePayload: PendingLog['payload'] = {
+  activity_type: 'seed',
+  description: 'Maize seed, 2 kg',
+  financial_data: { amount: 3500, transaction_type: 'debit', category: 'seed' },
+}
+
 function queue(overrides: Partial<PendingLog> = {}): PendingLog {
   const row: PendingLog = {
     id: nextId++,
+    ownerKey: FARM_A,
     clientId: `client-${nextId}`,
-    payload: {
-      activity_type: 'seed',
-      description: 'Maize seed, 2 kg',
-      financial_data: { amount: 3500, transaction_type: 'debit', category: 'seed' },
-    },
+    payload: basePayload,
     status: 'pending',
     failCount: 0,
     createdAt: Date.now(),
@@ -76,6 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   rows.length = 0
   nextId = 1
+  ownerState.key = FARM_A
   createLog.mockResolvedValue(accepted)
 })
 
@@ -207,5 +233,100 @@ describe('retryFailedLogs', () => {
     // send the log straight back to 'failed' on a stale count.
     expect(log.failCount).toBe(1)
     expect(log.status).toBe('pending')
+  })
+})
+
+// --- Owner scoping: the queue is partitioned by the account that filled it ----
+//
+// The audit (docs/STATE_REPORT_2026-08-25.md §9.13) found the queue carried no
+// identity at all: every pending row was flushed under whatever token was
+// current, so a record captured offline by one farm was POSTed into the next
+// account to sign in. These are the regressions for that.
+
+describe('queue isolation by identity', () => {
+  it('never flushes another account\'s queued write', async () => {
+    // Distinguishable payloads: the default queue() payload is identical row to
+    // row, and toHaveBeenCalledWith compares by value, so two default rows would
+    // match each other and the negative assertion below would be vacuous.
+    const mine = queue({ ownerKey: FARM_A, payload: { ...basePayload, description: 'farm A seed' } })
+    const theirs = queue({ ownerKey: FARM_B, payload: { ...basePayload, description: 'farm B seed' } })
+
+    await flushPendingLogs()
+
+    expect(createLog).toHaveBeenCalledTimes(1)
+    expect(createLog).toHaveBeenCalledWith(mine.payload)
+    expect(createLog).not.toHaveBeenCalledWith(theirs.payload)
+    // Farm B's record is untouched, not sent and not deleted: it is still B's.
+    expect(rows).toEqual([expect.objectContaining({ id: theirs.id, ownerKey: FARM_B })])
+  })
+
+  it('never retries another account\'s failed write', async () => {
+    const theirs = queue({ ownerKey: FARM_B, status: 'failed', failCount: 3 })
+
+    await retryFailedLogs()
+
+    expect(createLog).not.toHaveBeenCalled()
+    expect(rows).toEqual([expect.objectContaining({ id: theirs.id, status: 'failed', failCount: 3 })])
+  })
+
+  it('leaves the queue alone entirely when nobody is signed in', async () => {
+    queue({ ownerKey: FARM_A })
+    ownerState.key = null
+
+    await flushPendingLogs()
+    await retryFailedLogs()
+
+    // Signed out there is no account to POST as, so the rows wait rather than
+    // being drained into a session that does not exist.
+    expect(createLog).not.toHaveBeenCalled()
+    expect(rows).toHaveLength(1)
+  })
+})
+
+describe('logout cleanup', () => {
+  it('drops the signed-in account\'s queued writes and nobody else\'s', async () => {
+    queue({ ownerKey: FARM_A })
+    queue({ ownerKey: FARM_A, status: 'failed', failCount: 3 })
+    const theirs = queue({ ownerKey: FARM_B })
+
+    await purgeQueueForCurrentOwner()
+
+    // Both of A's rows go — pending and failed alike — and B's stays.
+    expect(rows).toEqual([expect.objectContaining({ id: theirs.id, ownerKey: FARM_B })])
+  })
+
+  it('does nothing when there is no signed-in account to purge for', async () => {
+    queue({ ownerKey: FARM_A })
+    ownerState.key = null
+
+    await purgeQueueForCurrentOwner()
+
+    expect(rows).toHaveLength(1)
+  })
+
+  it('a write queued before logout is not flushed after a different account logs in', async () => {
+    // The exact sequence the defect produced: farm A captures a record with no
+    // connection, signs out, farm B signs in on the same browser, connectivity
+    // returns. Before the fix this POSTed A's record into B's ledger.
+    const captured = queue({ ownerKey: FARM_A })
+
+    await purgeQueueForCurrentOwner()   // A signs out
+    ownerState.key = FARM_B             // B signs in
+    await flushPendingLogs()            // connection comes back
+
+    expect(createLog).not.toHaveBeenCalled()
+    expect(rows).not.toContain(captured)
+  })
+
+  it('survives the purge failing: the row is still inert for the next account', async () => {
+    // purgeQueueForCurrentOwner is fire-and-forget and best-effort, so the
+    // owner scope has to hold on its own if the purge never lands.
+    const captured = queue({ ownerKey: FARM_A })
+
+    ownerState.key = FARM_B             // B signs in; A's purge never happened
+    await flushPendingLogs()
+
+    expect(createLog).not.toHaveBeenCalled()
+    expect(rows).toEqual([expect.objectContaining({ id: captured.id, ownerKey: FARM_A })])
   })
 })

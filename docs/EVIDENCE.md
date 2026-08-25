@@ -231,14 +231,51 @@ the finding above). Figures are as of 2026-08-25 on `feat/partial-budget-parity`
 | Figure | Command |
 |---|---|
 | Fixtures A–G: **11 passed, 29 deselected** | `python -m pytest backend/tests/test_enterprise_service.py -v -k "fixture_a or fixture_b or fixture_c or fixture_d or fixture_e or fixture_f or fixture_g"` |
-| Fixture H (endpoint layer): **32 passed, 96 deselected** | `python -m pytest backend/tests/test_api.py -q -k "enterprise or mechanis"` |
-| Full backend suite: **179 passed** | `python -m pytest backend/tests -q` |
+| Fixture H (endpoint layer): **39 passed, 95 deselected** | `python -m pytest backend/tests/test_api.py -q -k "enterprise or mechanization"` |
+| Full backend suite: **185 passed** | `python -m pytest backend/tests -q` |
 | `enterprise_service.py` **72 stmts, 0 miss, 100%** | `python -m pytest backend/tests --cov=backend/app --cov-report=term` |
-| Overall backend coverage **TOTAL 1285 stmts, 98 miss, 92%** | same command as above |
-| Full frontend suite: **41 passed, 6 files** | `cd frontend && npx vitest run` |
+| Overall backend coverage **TOTAL 1286 stmts, 98 miss, 92%** | same command as above |
+| Full frontend suite: **82 passed, 8 files** | `cd frontend && npx vitest run` |
 | Parity block alone: **40 passed** backend / **15 passed** frontend | `python -m pytest backend/tests/test_enterprise_service.py -q` · `cd frontend && npx vitest run src/features/dss/partialBudget.test.ts` |
 | Type check clean (exit 0) | `cd frontend && npx tsc -b` |
 | Lint clean (exit 0) | `cd frontend && npx eslint .` |
+
+> **These are the enterprise-economics phase's figures, not the frozen ones.**
+> Re-running the commands today gives higher counts: the evidence-freeze phase
+> added 5 backend tests (`backend/tests/test_concurrency.py`) and 7 frontend
+> tests (`frontend/src/lib/dbUpgrade.test.ts`), taking the suites to **190
+> backend / 89 frontend** and coverage to **93% (1,286 statements, 91 missed)**.
+> The table is left as captured because it is a dated measurement paired with
+> the command that produced it. The frozen figures are in
+> `docs/EVIDENCE_FREEZE_2026-08-25.md`.
+
+### Correction: the Fixture H command used a token that matched nothing
+
+The row above previously read **32 passed, 96 deselected** from:
+
+```
+python -m pytest backend/tests/test_api.py -q -k "enterprise or mechanis"
+```
+
+`mechanis` matches **no test**. pytest's `-k` does not substring-match the way
+that expression assumed, so the second clause contributed nothing and the
+command selected only the 32 `enterprise*` tests — while appearing to cover the
+mechanisation schema tests as well. Measured on this machine:
+
+```
+$ python -m pytest backend/tests/test_api.py -q -k "enterprise"
+32 passed, 102 deselected
+
+$ python -m pytest backend/tests/test_api.py -q -k "mechanization"
+6 passed, 128 deselected
+
+$ python -m pytest backend/tests/test_api.py -q -k "mechanis"
+134 deselected
+```
+
+The tests always passed; what was wrong was the recorded command and therefore
+what the figure was understood to cover. `mechanization` in full selects the six
+it was meant to, and the union is 39 (two names match both clauses).
 
 ## Scope figures
 
@@ -315,3 +352,217 @@ figure, guarded at line 82 so a crop with no drying run (and therefore no
 marketable mass) falls back rather than rendering a null. The two break-even
 prices carry the same `/kg marketable` suffix at
 `frontend/src/features/dss/components/BreakEvenPricePanel.tsx:29`.
+
+---
+
+# Evidence — the post-audit remediation, and that its tests are load-bearing
+
+Work carried out on 2026-08-25 against the findings in
+`docs/STATE_REPORT_2026-08-25.md`. Every claim below is a command to re-run, not
+a result to take on trust. Run from the repository root unless stated.
+
+## Baseline, before and after
+
+| Figure | Before (state report) | After remediation | At freeze |
+|---|---|---|---|
+| Backend tests | 179 passed | 185 passed | **190 passed** |
+| Backend statements / missed / coverage | 1,285 / 98 / 92% | 1,286 / 98 / 92% | **1,286 / 91 / 93%** |
+| Frontend test files / tests | 6 / 41 | 8 / 82 | **9 / 89** |
+| Frontend entry bundle | 406,941 B raw · 130,365 B gzip | see §"Bundle" below | 398.38 kB raw · 129.50 kB gzip |
+
+The "At freeze" column is the evidence-freeze phase: `test_concurrency.py` (5
+backend) and `dbUpgrade.test.ts` (7 frontend). The 7 statements that leave the
+missed count are all in `ledger_service.py`, which goes 86% → 98% because the
+concurrency tests are the first to execute its `IntegrityError` recovery path.
+No application code changed between the middle column and the right one.
+
+Commands: `python -m pytest backend/tests -q`,
+`python -m pytest backend/tests --cov=backend/app --cov-report=term`,
+`cd frontend && npx vitest run`.
+
+## 1. The offline write queue is identity-scoped (state report §9.13)
+
+`frontend/src/lib/queueOwner.ts` derives an owner key from the token's `sub`
+claim; `PendingLog` gains `ownerKey`; every queue read goes through the
+`[ownerKey+status]` compound index added in Dexie schema v2; and
+`purgeQueueForCurrentOwner()` runs on logout **before** the token is cleared.
+
+### That the tests fail when the scope is removed
+
+Two independent mutations, each run against `src/lib/sync.test.ts`.
+
+**Mutation A — ignore the owner on every read.** Replace the body of
+`ownerScopedRows` in `frontend/src/lib/sync.ts` with an unscoped query:
+
+```ts
+function ownerScopedRows(status: 'pending' | 'failed') {
+  const owner = currentOwnerKey();
+  void owner;
+  return db.pendingLogs.where('status').equals(status) as never;
+}
+```
+
+```
+cd frontend && npx vitest run src/lib/sync.test.ts
+→ Tests  8 failed | 7 passed (15)
+```
+
+Among the failures is `never flushes another account's queued write`. **Read
+this mutation narrowly**: the in-memory stand-in for the Dexie table implements
+only the owner-scoped query shapes, so seven of those eight failures are the
+mock refusing an unsupported shape rather than an assertion about ownership.
+Mutation B is the clean one.
+
+**Mutation B — neuter only the logout purge.** Replace the body of
+`purgeQueueForCurrentOwner()` with `void owner; return;`:
+
+```
+cd frontend && npx vitest run src/lib/sync.test.ts
+→ Tests  2 failed | 13 passed (15)
+```
+
+```
+× logout cleanup > drops the signed-in account's queued writes and nobody else's
+× logout cleanup > a write queued before logout is not flushed after a different account logs in
+```
+
+Nothing else moves, which is the point: the remaining thirteen — including
+`survives the purge failing: the row is still inert for the next account` — hold
+on the owner scope alone. The purge and the scope are independent protections
+and the suite distinguishes them.
+
+**The file is restored in the commit.** `git diff` on `frontend/src/lib/sync.ts`
+shows the scoped implementation, not either mutation.
+
+### What this does and does not establish
+
+**Does:** that a row belonging to one owner key is never POSTed, retried,
+counted or deleted while another owner key is signed in; that logout removes the
+departing account's rows and only theirs; and that the exact reported sequence
+(queue offline → sign out → another account signs in → connectivity returns)
+sends nothing.
+
+**Does not:** anything about a real IndexedDB. `sync.test.ts` runs against an
+in-memory stand-in implementing the query shapes `sync.ts` uses, so the Dexie v2
+`.upgrade()` that attributes or drops pre-existing v1 rows is **not** exercised
+by any test — it needs a real IndexedDB and a database that already holds v1
+data. It is reasoned, commented in `lib/db.ts`, and unverified.
+
+`src/lib/queueOwner.test.ts` (16 cases) covers the key derivation itself,
+including base64url payloads, a numeric `sub`, and the six malformed-token cases
+that must return null rather than a key that would match somebody's rows.
+
+## 2. `client_id` uniqueness is farm-scoped (state report §9.14)
+
+Migration `e6a2b4c7d130` replaces the global unique index on `client_id` with
+`UNIQUE(farm_id, client_id)` and restores a plain index. The model carries the
+matching `__table_args__`. `ledger_service` is unchanged apart from its comment:
+the recovery lookup it already performed is now the only case the constraint can
+reject.
+
+### That the tests fail against the old constraint
+
+Restore the pre-migration model — `client_id = Column(String, unique=True,
+nullable=True, index=True)` and delete the `UniqueConstraint` from
+`__table_args__` — then:
+
+```
+python -m pytest backend/tests/test_api.py -q -k "client_id or idempot"
+```
+
+```
+E  sqlite3.IntegrityError: UNIQUE constraint failed: operational_logs.client_id
+E  sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: operational_logs.client_id
+```
+
+That IntegrityError is the 500: in the application it escapes
+`ledger_service.create_operational_log`'s bare `raise` and lands on the
+catch-all handler at `backend/app/main.py:67`. Restored, the same command gives
+**5 passed, 127 deselected**.
+
+### Applied to the live database
+
+```
+$ docker compose up -d --build backend        # migrations run on startup
+$ docker exec agrip-db-1 psql -U postgres -d agriprofit -t \
+    -c "SELECT version_num FROM alembic_version;"
+ e6a2b4c7d130
+
+$ docker exec agrip-db-1 psql -U postgres -d agriprofit \
+    -c "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint
+        WHERE conrelid='operational_logs'::regclass AND contype='u';"
+ uq_operational_logs_farm_client | UNIQUE (farm_id, client_id)
+```
+
+The index on `client_id` is now non-unique (`\d operational_logs`). No row was
+touched: the composite constraint is strictly weaker than the global one, so
+nothing existing can violate it.
+
+### What this does and does not establish
+
+**Does:** that two farms may hold the same `client_id`, that each sees only its
+own row with its own amount, that same-farm idempotent replay still returns 200
+with the original id, and that NULL `client_id` remains exempt.
+
+**Does not:** anything about the concurrent same-farm race that the
+`except IntegrityError` branch exists for. That path is still uncovered
+(`ledger_service.py` lines 57–73 are among its 8 missed statements) and still
+needs two simultaneous requests to provoke.
+
+## 3. Drying readings, the drying curve, and the yield baseline
+
+`buildDryingParams` now validates and carries `readings`, mirroring
+`DryingReading`'s bounds and the three readings clauses of
+`_check_physical_consistency`; `DryingFields` collects them; `DryingCurveChart`
+plots them. Ten new cases in
+`frontend/src/features/farm-records/dryingParams.test.ts` cover the band edges
+(inclusive), strictly-increasing time, the half-filled row, and the blank row
+that must be dropped rather than rejected.
+
+The chart plots **measured points only** — the run's start, the readings, and
+its final moisture, all off `GET /bioprocess/{id}`. The fitted Newton and Page
+curves are deliberately not drawn: drawing them would mean a second
+implementation of the kinetics in the browser, which is the failure this file
+already documents for the partial budget.
+
+`YieldBaselinePanel` renders `GET /dss/yield-baseline`, which had been
+implemented, tested and service-worker-cached with no interface reading it.
+
+### Not verified
+
+No test renders `DryingFields`, `DryingCurveChart` or `YieldBaselinePanel`.
+There is no component-test harness for them in this project, and the state
+report already records every panel on the DSS and records screens as
+implemented-but-not-verified. Their inputs are covered — `buildDryingParams` for
+the form, the endpoint tests for the panel's data — and the components
+themselves are covered by inspection and by the live probe in §5.
+
+## 4. Crop options come from the API (state report §7.4)
+
+`frontend/src/features/farm-records/cropOptions.ts` merges the farm's own
+recorded crops (`/dss/decision-support`) with the predictor's
+(`/dss/model`), normalised to trimmed lower case, deduped and sorted; the form
+adds an "Another crop…" free-text option so a crop neither source knows can
+still be entered. `cropOptions.test.ts` (8 cases) pins the merge, including the
+reported case: cowpea and tomato are offered because the farm recorded them,
+even though the model never saw them.
+
+`useCropOptions` uses `Promise.allSettled`, so one failed request narrows the
+list rather than emptying it. Nothing tests the hook itself.
+
+## 5. Bundle
+
+```
+cd frontend && npm run build
+```
+
+Sizes measured directly, not from Vite's report:
+
+```
+stat -c%s frontend/dist/assets/<entry>.js
+gzip -9 -c frontend/dist/assets/<entry>.js | wc -c
+```
+
+The current filenames, byte sizes and the whole-`dist` total are in the
+completion report for this work; the hashes change on every content change, so
+quoting a filename here would go stale on the next build.

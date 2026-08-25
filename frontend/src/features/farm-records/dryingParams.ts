@@ -4,6 +4,15 @@ import type { DryingMethod, DryingParams } from '../../types/domain';
 // component so the rules can be unit-tested (and so the component file exports
 // only components — react-refresh/only-export-components).
 
+// One intermediate measurement, held as strings while it is being typed. A row
+// with both boxes empty is a blank line the farmer has not filled in yet and is
+// dropped; a half-filled one is an error, because silently discarding a typed
+// number is how a reading goes missing without anybody noticing.
+export interface DryingReadingForm {
+  time_hours: string;
+  moisture_wb: string;
+}
+
 export interface DryingForm {
   method: DryingMethod;
   mass_in_kg: string;
@@ -12,7 +21,12 @@ export interface DryingForm {
   moisture_final_wb: string;
   drying_time_hours: string;
   air_temperature_c: string;
+  // Optional. Three or more usable readings unlock the Page-model fit and the
+  // drying curve; with none, the run still saves and reports every other metric.
+  readings: DryingReadingForm[];
 }
+
+export const emptyDryingReading: DryingReadingForm = { time_hours: '', moisture_wb: '' };
 
 export const emptyDryingForm: DryingForm = {
   method: 'SUN',
@@ -22,6 +36,7 @@ export const emptyDryingForm: DryingForm = {
   moisture_final_wb: '',
   drying_time_hours: '',
   air_temperature_c: '',
+  readings: [],
 };
 
 // Mirrors backend schemas.DryingParams — the Field bounds AND the
@@ -54,6 +69,39 @@ export function buildDryingParams(f: DryingForm): { params: DryingParams } | { e
     return { error: 'Air temperature must be between -10 and 150 °C.' };
   }
 
+  // Intermediate readings, mirroring DryingReading's bounds and the three
+  // readings-related clauses of _check_physical_consistency. Same reason as the
+  // rest of this function: a 422 that only the server can see becomes a queued
+  // record that can never sync.
+  const rows = f.readings ?? [];
+  const readings: { time_hours: number; moisture_wb: number }[] = [];
+  let prevT: number | null = null;
+  for (const row of rows) {
+    const blankT = row.time_hours.trim() === '';
+    const blankM = row.moisture_wb.trim() === '';
+    if (blankT && blankM) continue;  // an untouched row, not an omission
+    if (blankT || blankM) {
+      return { error: 'Every reading needs both a time and a moisture — fill the row in or clear it.' };
+    }
+    const t = num(row.time_hours);
+    const m = num(row.moisture_wb);
+    if (Number.isNaN(t) || Number.isNaN(m)) {
+      return { error: 'Readings must be numbers.' };
+    }
+    if (t <= 0 || t > 720) return { error: 'Each reading time must be between 0 and 720 hours.' };
+    if (m <= 0 || m >= 100) return { error: 'Each reading moisture must be between 0 and 100 %.' };
+    if (prevT !== null && t <= prevT) {
+      return { error: 'Readings must go forward in time — each one later than the one above it.' };
+    }
+    // The band is the run's own start and end moisture. A reading outside it
+    // describes a different run, not this one.
+    if (m < mF || m > mI) {
+      return { error: `Each reading moisture must sit between ${mF} and ${mI} % — the run's own end and start.` };
+    }
+    prevT = t;
+    readings.push({ time_hours: t, moisture_wb: m });
+  }
+
   return {
     params: {
       process_type: 'DRYING',
@@ -64,6 +112,9 @@ export function buildDryingParams(f: DryingForm): { params: DryingParams } | { e
       moisture_final_wb: mF,
       drying_time_hours: hours,
       ...(temp !== null ? { air_temperature_c: temp } : {}),
+      // Omitted entirely when there are none: the backend defaults it to [], and
+      // sending an empty array would be a difference without a distinction.
+      ...(readings.length > 0 ? { readings } : {}),
     },
   };
 }

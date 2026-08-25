@@ -7,6 +7,20 @@ chapter, and nothing is rounded, reconciled or tidied on the way in.
 
 Measured 2026-08-19 on branch `feat/bioprocess-drying` at `e3bb674`.
 
+> **Superseded for current figures — kept as a dated capture, not corrected.**
+> This pack records what was measured on 2026-08-19 at `e3bb674`, and its
+> numbers are left exactly as captured because rewriting a dated measurement
+> would destroy the evidence it exists to be. They are **not** current: the
+> suite has since grown and two defects have been fixed. For the state of the
+> repository today see `docs/STATE_REPORT_2026-08-25.md` (the read-only audit of
+> 2026-08-25) and `docs/EVIDENCE.md` (the commands behind every current figure).
+> Two figures below have moved furthest: the backend suite is now 190 tests at
+> 93% (1,286 statements, 91 missed), and §7's "there is **no readings input** on
+> the form" is no longer true — the form collects intermediate readings and the
+> result panel draws the drying curve from them. The current figures are frozen
+> at tag `thesis-evidence-freeze-2026-08-25`; see
+> `docs/EVIDENCE_FREEZE_2026-08-25.md`.
+
 Sources: `docs/ch4-data/dss_per_crop.json`, `dss_break_even.json`,
 `bioprocess_summary.json`, `model_info.json`, `screenshot-runsheet.md`, and two
 live test runs reproduced below.

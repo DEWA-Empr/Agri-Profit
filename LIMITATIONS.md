@@ -120,6 +120,21 @@ database access. Unlike the ledger, where immutability is a deliberate design
 choice serviced by reversal, this is simply a missing write path: equipment is
 not a financial record and has no audit reason to be append-only.
 
+**Mechanisation records machine use but does not cost it.** A mechanisation log
+may carry `equipment_id` and `hours_used` alongside its `cost_subtype`. Only
+`cost_subtype` drives a figure — it selects the cost-behaviour bucket. The other
+two are *capture-only*: validated (`0 < hours_used <= 1000`), persisted, and read
+by nothing. This is a deliberate scope boundary rather than a defect, recorded in
+`docs/adr/0003`: no machine-hour rate, utilisation figure or cost-per-hour metric
+is defined anywhere in this platform's specifications, and inventing one would
+put uncited arithmetic underneath cost-structure and break-even numbers the
+thesis defends. The consequence is that the system can answer "what did
+mechanisation cost, and was that cost fixed or variable?" but cannot answer "what
+does an hour of tractor time cost?" — and no chapter should claim otherwise.
+Machine-hour costing is future work, and it needs a cited method before it needs
+code. `hours_used` is also optional on every write, so any rate built from
+today's data would be computed over an unknown fraction of actual machine use.
+
 **Per-crop decision support does not yet net reversals.** The farm-wide P&L and
 its top-line figures correctly subtract a reversal from the pile its category
 feeds (ticket 10b). The *per-crop* decision-support breakdown, and the investor
@@ -164,16 +179,24 @@ loss on this path. Not every form in the application is offline-capable to the
 same degree, and the sync model is idempotent-replay, not a full conflict-resolving
 CRDT: it assumes a single author per device and does not merge concurrent edits.
 
-**The offline queue is not identity-scoped.** On logout the application clears the
-auth token and purges the cached read responses, but it does **not** clear the
-IndexedDB queue of unsynced writes. Two consequences follow, confirmed by code
-inspection: first, unsynced entries — which contain financial amounts — persist in
-the browser after sign-out, a privacy concern on a shared device; second, on a
-shared browser an entry queued by one account could be flushed under the next
-account's token and land in the wrong farm. On a single personal device (the
-common case for the target user) this is benign, but it should be closed before
-any shared-device or kiosk deployment. The fix is to scope or clear the queue on
-authentication change.
+**The offline queue is identity-scoped, and cleared on logout.** This was
+previously a stated limitation: the queue carried no identity, so on a shared
+browser an entry queued by one account could be flushed under the next account's
+token and land in the wrong farm, and unsynced entries containing financial
+amounts persisted after sign-out. Both are now closed. Every queued row is
+stamped with an owner key derived from the token's subject (`lib/queueOwner`),
+and the flush, the retry, the pending count and the failed count all read
+through a compound `[ownerKey+status]` index — so one account's rows are inert
+for every other, and are not drained when nobody is signed in. Logout purges the
+departing account's rows before clearing the token. The two protections are
+independent on purpose: the purge is best-effort and fire-and-forget, so the
+scope has to hold on its own if it never lands, and a regression test asserts
+exactly that. Purging does discard unsent work — a deliberate trade, since the
+alternative is leaving one farm's records readable in a shared browser's
+IndexedDB after its owner has left it; the pending count is on screen in the
+sidebar while it is non-zero. Rows written by the previous, unscoped version are
+attributed to the signed-in account on upgrade, or dropped if there is none,
+because an unattributable row is precisely what the defect flushed.
 
 **Cached reads are purged coarsely.** Offline *reads* are served from a
 service-worker cache of authenticated GET responses. Because the cache is keyed
@@ -185,12 +208,16 @@ reads are always uncached.
 
 ## 6. Alternative Channels
 
-**USSD, SMS, and WhatsApp entry are simulated.** The PRD envisions low-end
-feature-phone access; the current build presents these as interface simulations,
-not live integrations. There is no telecom aggregator, USSD gateway, or
-WhatsApp Business API connection. Demonstrating the interaction design is in
-scope; a production channel — with its session management, character-set limits,
-and per-message billing — is not.
+**USSD, SMS, and WhatsApp entry are absent, not simulated.** This section
+previously said the build presented them as interface simulations. It does not:
+the ACCESS navigation section carrying them was removed in `b6e2ddb` because
+neither had a backend behind it, and `frontend/src/app/navigation.tsx` records
+that every remaining entry is a built feature. The same paragraph credited the
+ambition to the PRD; `PRD.md` contains no mention of USSD, SMS or WhatsApp, so
+that attribution is withdrawn rather than repeated. There is no telecom
+aggregator, USSD gateway or WhatsApp Business API connection, and no interface
+standing in for one. A production channel — with its session management,
+character-set limits and per-message billing — remains out of scope.
 
 ## 7. Performance and Scale
 
@@ -224,15 +251,29 @@ grounded rather than aspirational.
 
 ## 8. Verification and Assurance
 
-Automated backend coverage is **88%** across 42 tests, concentrated on the
-business logic (services, endpoints, schemas, and models at 86–100%); the
-untested remainder is chiefly the ML training and data-generation command-line
-paths. There is no end-to-end browser-automation suite — offline behaviour and
-the service-worker cache lifecycle were verified by code inspection and API-level
-probing rather than by a driven browser — and no independent security penetration
-test beyond the internal pre-defense audit. The audit found no critical (data-loss
-or cross-tenant) defects, but its absence of findings is scoped to what it
-exercised and is not a substitute for external review.
+Automated backend statement coverage is **93%** — 1,286 statements, 91 missed —
+across **190 backend tests**, alongside **89 frontend tests** in 9 files. Coverage
+is concentrated on the business logic: every service except `ledger_service`
+(98%) and `reports_service` (94%) is at 100%, as are the schemas, the models and
+five of the seven endpoint modules. Three modules sit below 80% and are the
+untested remainder: `ml/dataset.py` (36%), `ml/train.py` (42%) and
+`models/database.py` (64%) — the ML data-generation and training command-line
+paths, and engine construction. The figures are statement coverage, not branch
+coverage; `--cov-branch` is not used.
+
+There is no end-to-end browser-automation suite — offline behaviour and the
+service-worker cache lifecycle are verified by unit tests against stand-ins
+(a stand-in Cache Storage in `cacheInvalidation.test.tsx`, an in-memory Dexie
+table in `sync.test.ts`) and by API-level probing, not by a driven browser. There
+is no independent security penetration test beyond the internal audits.
+
+The read-only state audit of 25 August 2026 (`docs/STATE_REPORT_2026-08-25.md`)
+did find defects, and this section previously claimed otherwise. Two were
+cross-tenant or data-integrity issues and both are now fixed: the offline write
+queue was not identity-scoped (Section 5 above), and `client_id` uniqueness was
+global while idempotency was farm-scoped, so a cross-farm collision returned an
+unhandled HTTP 500 (Section 3 above). The absence of further findings is scoped
+to what the audit exercised and is not a substitute for external review.
 
 ---
 

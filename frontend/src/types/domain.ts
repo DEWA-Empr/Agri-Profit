@@ -230,6 +230,25 @@ export interface CropSensitivity {
   rows: SensitivityRow[];
 }
 
+// Mirrors backend schemas.CropYieldBaseline. `reason` carries the words behind a
+// null — one season, mixed units and nothing recorded are three different
+// nulls, and n_seasons is reported in every branch so a null is never read
+// without the count that explains it (ADR-0002 section 3).
+export interface CropYieldBaseline {
+  crop: string;
+  olympic_average_kg?: number | null;
+  grand_average_kg?: number | null;
+  n_seasons: number;
+  n_used: number;
+  n_discarded: number;
+  unit?: string | null;
+  reason?: string | null;
+}
+
+export interface YieldBaselineResponse {
+  crops: CropYieldBaseline[];
+}
+
 export interface SensitivityResponse {
   crops: CropSensitivity[];
   period_days: number;

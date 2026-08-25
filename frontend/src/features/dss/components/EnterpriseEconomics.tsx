@@ -6,8 +6,10 @@ import { CostStructurePanel } from './CostStructurePanel';
 import { BreakEvenPricePanel } from './BreakEvenPricePanel';
 import { SensitivityTable } from './SensitivityTable';
 import { PartialBudgetForm } from './PartialBudgetForm';
+import { YieldBaselinePanel } from './YieldBaselinePanel';
 import type {
   CostStructureResponse, BreakEvenPriceResponse, SensitivityResponse,
+  YieldBaselineResponse,
 } from '../../../types/domain';
 
 // Enterprise economics, on the DSS view.
@@ -30,6 +32,7 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
   const [structure, setStructure] = useState<CostStructureResponse | null>(null);
   const [breakEven, setBreakEven] = useState<BreakEvenPriceResponse | null>(null);
   const [sensitivity, setSensitivity] = useState<SensitivityResponse | null>(null);
+  const [baseline, setBaseline] = useState<YieldBaselineResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   // ONLY the user's explicit choice is state. The crop actually shown is
@@ -43,11 +46,13 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
       dssService.getCostStructure(),
       dssService.getBreakEvenPrice(),
       dssService.getSensitivity(),
+      dssService.getYieldBaseline(),
     ])
-      .then(([cs, be, se]) => {
+      .then(([cs, be, se, yb]) => {
         setStructure(cs.data);
         setBreakEven(be.data);
         setSensitivity(se.data);
+        setBaseline(yb.data);
       })
       .catch(() => setFailed(true))
       .finally(() => setLoaded(true));
@@ -72,6 +77,11 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
   const selectedStructure = structure?.crops.find((c) => c.crop === crop);
   const selectedBreakEven = breakEven?.crops.find((c) => c.crop === crop);
   const selectedSensitivity = sensitivity?.crops.find((c) => c.crop === crop);
+  // The yield baseline is keyed on crops that have recorded YIELD, so a
+  // cost-only crop (tomato, sorghum) legitimately has no row here while it does
+  // have a cost structure. Absent means absent — the panel is not rendered
+  // rather than rendered full of dashes.
+  const selectedBaseline = baseline?.crops.find((c) => c.crop === crop);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -138,6 +148,8 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
           {selectedSensitivity && sensitivity && (
             <SensitivityTable crop={selectedSensitivity} meta={sensitivity} card={card} />
           )}
+
+          {selectedBaseline && <YieldBaselinePanel crop={selectedBaseline} card={card} />}
         </>
       )}
 
