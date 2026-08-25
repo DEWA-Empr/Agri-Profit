@@ -218,3 +218,73 @@ disagree with neither.
    passes, while `DATABASE_URL=sqlite` *breaks* the run with
    `sqlalchemy.exc.ArgumentError: Could not parse SQLAlchemy URL from given URL
    string`. Correcting that note is not in this ticket.
+
+---
+
+# Evidence — the command behind every figure quoted for the branch
+
+Run from the repository root unless stated. No `DATABASE_URL` is required (see
+the finding above). Figures are as of 2026-08-25 on `feat/partial-budget-parity`.
+
+## Test and coverage figures
+
+| Figure | Command |
+|---|---|
+| Fixtures A–G: **11 passed, 29 deselected** | `python -m pytest backend/tests/test_enterprise_service.py -v -k "fixture_a or fixture_b or fixture_c or fixture_d or fixture_e or fixture_f or fixture_g"` |
+| Fixture H (endpoint layer): **32 passed, 96 deselected** | `python -m pytest backend/tests/test_api.py -q -k "enterprise or mechanis"` |
+| Full backend suite: **179 passed** | `python -m pytest backend/tests -q` |
+| `enterprise_service.py` **72 stmts, 0 miss, 100%** | `python -m pytest backend/tests --cov=backend/app --cov-report=term` |
+| Overall backend coverage **TOTAL 1285 stmts, 98 miss, 92%** | same command as above |
+| Full frontend suite: **41 passed, 6 files** | `cd frontend && npx vitest run` |
+| Parity block alone: **40 passed** backend / **15 passed** frontend | `python -m pytest backend/tests/test_enterprise_service.py -q` · `cd frontend && npx vitest run src/features/dss/partialBudget.test.ts` |
+| Type check clean (exit 0) | `cd frontend && npx tsc -b` |
+| Lint clean (exit 0) | `cd frontend && npx eslint .` |
+
+## Scope figures
+
+| Figure | Command |
+|---|---|
+| No Alembic migration on the branch | `git diff --stat main...HEAD -- backend/alembic/versions/ alembic/versions/` (empty) |
+| Nothing under `backend/app/ml/` modified | `git diff --stat main...HEAD -- backend/app/ml/` (empty) |
+| `backend/tests/` additions **2194 insertions, 4 deletions** | `git diff --stat main...HEAD -- backend/tests/` |
+| The 4 deletions are an HS256 comment rewrite, not enterprise economics | `git log --oneline -S "Flip the final signature character" main...HEAD -- backend/tests/` → `8690289 fix(bioprocess): water_removed_kg is a water balance…` |
+| Dependency changes on the branch: `pytest-cov`, `@vitest/coverage-v8` | `git diff main...HEAD -- backend/requirements.txt frontend/package.json` · attributed by `git log --oneline main...HEAD -- backend/requirements.txt frontend/package.json` → `ec00162`, `0046b43` |
+| Parity commit adds no dependency, migration or `ml/` change | `git show --stat 330f1d9 -- backend/requirements.txt frontend/package.json backend/app/ml/ backend/alembic/` (empty) |
+
+## Seed idempotency — the maize figures are bit-identical
+
+The maize figures **₦35.00/kg harvested** and **₦41.67/kg marketable** are quoted
+in a defended chapter, so the multi-crop seed must not move them. With the stack
+up (`docker compose up -d`, containers `agrip-backend-1` and `agrip-db-1`),
+captured before and after a re-run of the seed:
+
+```
+python backend/scripts/seed_bioprocess_demo.py
+```
+
+Read back with `GET /api/v1/dss/decision-support` as
+`demo-bioprocess-v2@test.example`, selecting the maize crop object:
+
+```json
+{ "crop": "maize", "expenses": 3500.0, "revenue": 45000.0,
+  "gross_margin": 41500.0, "yield_quantity": 100.0,
+  "marketable_mass_kg": 84.0,
+  "unit_cost_of_production": 35.0,
+  "unit_cost_per_kg_marketable": 41.666666666666664,
+  "break_even_yield": 7.777777777777778 }
+```
+
+Byte-identical before and after (md5 `1850df22069facec23e86032275c659f` on both
+captures; `diff` reports no differences). The seed reported
+`28 operational logs, 28 financial transactions, 2 equipment` with every log
+returning **HTTP 200** rather than 201 — the ledger's `client_id` idempotency
+returning existing rows instead of duplicating them.
+
+## Where the marketable unit cost is visible
+
+`frontend/src/features/dashboard/components/DecisionSupport.tsx:85` renders
+`Unit cost {nairaExact(marketableCost)}/kg marketable` beside the harvest-unit
+figure, guarded at line 82 so a crop with no drying run (and therefore no
+marketable mass) falls back rather than rendering a null. The two break-even
+prices carry the same `/kg marketable` suffix at
+`frontend/src/features/dss/components/BreakEvenPricePanel.tsx:29`.
