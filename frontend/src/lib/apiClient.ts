@@ -23,6 +23,7 @@ import type {
   PartialBudgetResponse,
 } from '../types/domain';
 import { getToken, clearToken } from './authToken';
+import { purgeApiReadCache } from './apiCache';
 
 // The single axios instance for the whole app. Components and feature api
 // modules import from here — nothing constructs raw axios calls or hardcodes
@@ -92,7 +93,31 @@ export const authService = {
 // mirror of the backend Pydantic schemas (STRUCTURE.md §5).
 export const ledgerService = {
   getLogs: () => api.get<OperationalLog[]>('/ledger/logs'),
-  createLog: (data: OperationalLogCreate) => api.post<OperationalLog>('/ledger/logs', data),
+  // The ONE write path for an operational log — both the online save
+  // (lib/logs.ts) and the offline queue flush (lib/sync.ts) post through here,
+  // so the read-cache invalidation lives here rather than in either caller.
+  // Every derived read the service worker caches (the ledger, the P&L, and the
+  // four /dss reads behind the cost structure, both break-even prices, the
+  // sensitivity table and the OER) is computed from these rows, so a log that
+  // reached the server makes all of them stale at once.
+  //
+  // Purge on 2xx, and on 409 too: a 409 here is an idempotent replay of a
+  // client_id the server already holds, which means the record exists on the
+  // server side and the cached reads are just as stale as after a fresh write.
+  // Every other failure — offline, timeout, 5xx — leaves the write queued
+  // rather than posted, and there is nothing new to invalidate.
+  createLog: async (data: OperationalLogCreate) => {
+    try {
+      const res = await api.post<OperationalLog>('/ledger/logs', data);
+      await purgeApiReadCache();
+      return res;
+    } catch (err: unknown) {
+      if ((err as { response?: { status?: number } })?.response?.status === 409) {
+        await purgeApiReadCache();
+      }
+      throw err;
+    }
+  },
   getSummary: () => api.get<Summary>('/ledger/summary'),
   getTransactions: () => api.get<FinancialTransaction[]>('/ledger/transactions'),
   // Post an offsetting entry for a mistaken log. Ledger records are immutable —

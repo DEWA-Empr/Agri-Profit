@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { X, Wrench, Plus, Calendar } from 'lucide-react';
 import { equipmentService } from '../../../lib/apiClient';
+import { purgeApiReadCache } from '../../../lib/apiCache';
 import type { Equipment, MaintenanceLog } from '../../../types/domain';
 import { colors } from '../../../styles/theme';
 
@@ -44,6 +45,12 @@ export const MaintenancePanel = ({ equipment, onClose }: { equipment: Equipment;
         description: form.description,
         cost: form.cost ? parseFloat(form.cost) : undefined,
       });
+      // A maintenance cost is SEMI_VARIABLE cost on the cost structure, and it
+      // feeds the cash cost behind the break-even price to cover cash cost and
+      // the sensitivity table. Like equipment creation, this write does not go
+      // through ledgerService.createLog, so the cached DSS reads are dropped
+      // here or they keep serving the pre-service figures.
+      await purgeApiReadCache();
       setForm({ description: '', cost: '' });
       refresh();
     } catch {

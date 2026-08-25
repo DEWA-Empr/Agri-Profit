@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Tractor, Plus, Wrench, Calendar, Hash } from 'lucide-react';
 import { equipmentService } from '../../lib/apiClient';
+import { purgeApiReadCache } from '../../lib/apiCache';
 import type { Equipment, EquipmentCreate } from '../../types/domain';
 import { colors } from '../../styles/theme';
 import { MaintenancePanel } from './components/MaintenancePanel';
@@ -40,6 +41,14 @@ const EquipmentPage = () => {
     if (newEq.depreciation_rate !== '') payload.depreciation_rate = parseFloat(newEq.depreciation_rate);
     try {
       await equipmentService.createEquipment(payload);
+      // A new asset changes the depreciation overlay on the DSS reads — the
+      // allocated fixed cost, the break-even price to cover total cost, and the
+      // "N of your M assets have no depreciation rate recorded" qualification
+      // that travels with it. Those reads are cached StaleWhileRevalidate, so
+      // without this the panel would keep reading the pre-creation counts.
+      // Equipment does not post through ledgerService.createLog, so it gets no
+      // purge from there.
+      await purgeApiReadCache();
       setShowAddForm(false);
       setNewEq(emptyForm);
       fetchEquipment();
