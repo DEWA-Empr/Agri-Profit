@@ -121,3 +121,100 @@ call `purgeApiReadCache` directly:
 
 (Import lines are `4` in both files. Verify with
 `grep -n "purgeApiReadCache" frontend/src/features/equipment/EquipmentPage.tsx frontend/src/features/equipment/components/MaintenancePanel.tsx`.)
+
+---
+
+# Evidence — the partial-budget parity fixture actually fails when it should
+
+`frontend/src/features/dss/partialBudget.ts` is a second implementation of
+`backend/app/services/enterprise_service.partial_budget`. Both files asserted in
+prose that they must agree and nothing executed both and compared; the two
+suites shared seven cases and not one input tuple. A term added to one
+implementation left both suites green.
+
+`frontend/src/fixtures/partial_budget_parity.json` (cases **PB-1..PB-8**, all
+values hand-computed and never regenerated from either implementation) is now
+read verbatim by both `backend/tests/test_enterprise_service.py` and
+`frontend/src/features/dss/partialBudget.test.ts`. Both implementations agreed
+with all eight on the first run — no divergence was found.
+
+Note that **A-H and PB-1..PB-8 are two disjoint sets**, not two names for one
+set: A-G are the enterprise-economics fixtures in `test_enterprise_service.py`,
+H is the rejection/isolation set in `test_api.py`, and PB-1..PB-8 are the parity
+cases. (Register finding P1-04.)
+
+## Why the failure runs exist
+
+A parity test that skips, catches, or defaults when it cannot find its input is
+indistinguishable from no parity test at all — the exact condition the fixture
+exists to end. So the fixture read is uncaught in both suites, and that claim is
+verified rather than asserted: three ways of breaking the fixture, each run
+against both suites, six runs. **The fixture is restored and unmodified in the
+commit** (md5 `68b2549054fb6f06325fcd15c18c6f3b` before and after).
+
+## The commands
+
+The backend suite needs **no `DATABASE_URL`, no Docker and no Postgres**. Every
+database-touching fixture in `backend/tests/conftest.py` is function-scoped and
+`Base.metadata.create_all` runs only inside `db`; these cases request none of
+them. Run from the repository root:
+
+```
+python -m pytest backend/tests/test_enterprise_service.py -q
+cd frontend && npx vitest run src/features/dss/partialBudget.test.ts
+```
+
+Green baseline: **40 passed** (backend, 29 pre-existing + 11 new) and
+**15 passed** (frontend, 4 pre-existing + 11 new).
+
+## The six runs
+
+| # | Break | Suite | Failure |
+|---|---|---|---|
+| 1a | `mv …/partial_budget_parity.json …/partial_budget_parity.json.renamed` | backend | `FileNotFoundError: [Errno 2] No such file or directory: 'C:\Users\DELL\Desktop\Agri P\frontend\src\fixtures\partial_budget_parity.json'` — collection error, `Interrupted: 1 error during collection` |
+| 1b | same | frontend | Vite fails to resolve the import at transform time: `Failed to resolve import "../../fixtures/partial_budget_parity.json"`, pointing at line 3 of `partialBudget.test.ts`. `Test Files 1 failed (1) / Tests no tests` |
+| 2a | truncate to the first 400 bytes (invalid JSON) | backend | `json.decoder.JSONDecodeError: Unterminated string starting at: line 7 column 13 (char 277)` — collection error |
+| 2b | same | frontend | `Error: EOF while parsing a string at line 7 column 135`. `Test Files 1 failed (1) / Tests no tests` |
+| 3a | `"case_count": 8` → `9`, cases left at 8 | backend | `AssertionError: partial_budget_parity.json: case_count is 9 but cases has 8 entries` / `assert 9 == 8` in `test_parity_fixture_is_internally_consistent`. `1 failed, 39 passed` |
+| 3b | same | frontend | `AssertionError: partial_budget_parity.json: case_count is 9 but cases has 8 entries: expected 9 to be 8 // Object.is equality`. `Tests 1 failed \| 14 passed (15)` |
+
+Runs 1 and 2 fail at **import/collection** time in both suites, before any test
+body executes — which is the point: there is no code path in which a missing or
+malformed fixture yields a green run. Run 3 is the truncated-but-parseable case,
+which import-time failure cannot catch, so it is caught by comparing the file's
+own `case_count` against `len(cases)` and both against a constant declared in
+each test file.
+
+## What this does and does not establish
+
+**Does:** that both implementations of the partial budget produce the same net
+change for eight hand-computed tuples, including a negative result (PB-1, sign
+asserted separately from magnitude), an exact zero that is not negative zero
+(PB-3), kobo precision at `rel=1e-9` (PB-7), and a cross-pair transposition trap
+(PB-8). And that the fixture cannot go missing, malformed, or silently shrink
+without failing both suites.
+
+**Does not:** anything about the endpoint layer, serialisation, or the offline
+substitution logic that decides *which* implementation runs. It compares two
+pure functions. It also cannot establish that both are wrong in the same way —
+only that hand-computed expectations, which no implementation generated,
+disagree with neither.
+
+## Two findings recorded here, deliberately NOT changed by this ticket
+
+1. **`conftest.py` imports the database module at collection time.**
+   `backend/tests/conftest.py:8-9` imports `backend.app.main`, which reaches
+   `backend/app/models/database.py:5`, `engine = create_engine(settings.database_url)`,
+   evaluated at import for every test in the directory. It only parses the URL
+   and imports the driver — it does not connect — so the default
+   `postgresql://…@localhost/agriprofit` plus an installed psycopg2 is enough
+   and pure numeric tests run with no database. But it does mean a pure test
+   cannot be collected without a parseable URL and an importable driver. Out of
+   scope here.
+2. **The `run-backend-tests-locally` note is stale.** It says a SQLite
+   `DATABASE_URL` must be set or psycopg2 fails to import. Both halves are wrong
+   on this machine: psycopg2 2.9.12 is installed, and
+   `env -u DATABASE_URL python -m pytest backend/tests/test_enterprise_service.py -q`
+   passes, while `DATABASE_URL=sqlite` *breaks* the run with
+   `sqlalchemy.exc.ArgumentError: Could not parse SQLAlchemy URL from given URL
+   string`. Correcting that note is not in this ticket.

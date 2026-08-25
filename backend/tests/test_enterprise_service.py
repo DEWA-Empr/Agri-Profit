@@ -1,10 +1,30 @@
 """Unit tests for the pure enterprise-economics functions (Phase 3).
 
-Numbers-in / numbers-out — no database, no client, no fixtures. The expected
-values in Fixtures A-G are hand-calculated and independently verified: if the
-implementation disagrees, the implementation is wrong, not the fixture.
-Tolerance is pytest.approx(rel=1e-4) throughout.
+Numbers-in / numbers-out — no database, no client, no pytest fixtures. The
+expected values in Fixtures A-G are hand-calculated and independently verified:
+if the implementation disagrees, the implementation is wrong, not the fixture.
+Tolerance is pytest.approx(rel=1e-4) throughout, except the PB-7 precision case,
+which is rel=1e-9.
+
+One file is read from disk: the cross-implementation parity set PB-1..PB-8 at
+frontend/src/fixtures/partial_budget_parity.json, shared verbatim with
+frontend/src/features/dss/partialBudget.test.ts so that both implementations of
+the partial budget are executed against one set of hand-computed expectations.
+Those values are hand-computed and must never be regenerated from either
+implementation. The read is deliberately uncaught: a missing or malformed
+fixture fails this suite loudly, because a parity test that skips when it cannot
+find its input is indistinguishable from no parity test at all. The cases
+themselves stay numbers-in / numbers-out — the file supplies the numbers and
+nothing else.
+
+Note that A-H and PB-1..PB-8 are two DISJOINT sets, not two names for one set.
+A-G are the enterprise-economics fixtures in this file, H is the rejection and
+isolation set in test_api.py, and PB-1..PB-8 are the parity cases below.
 """
+import json
+import math
+from pathlib import Path
+
 import pytest
 
 from backend.app.services import enterprise_service as es
@@ -429,3 +449,99 @@ def test_three_identical_seasons_survive_the_single_instance_rule():
     assert o["olympic_average_kg"] == pytest.approx(700.0, rel=1e-4)
     assert o["grand_average_kg"] == pytest.approx(700.0, rel=1e-4)
     assert o["n_used"] == 1
+
+
+# --- PB-1..PB-8: cross-implementation parity -------------------------------
+#
+# Fixture: frontend/src/fixtures/partial_budget_parity.json
+#
+# The offline partial budget (frontend/src/features/dss/partialBudget.ts) is a
+# second implementation of es.partial_budget. Both files have long asserted in
+# prose that they must agree, and until now nothing executed both and compared.
+# This block and its twin in frontend/src/features/dss/partialBudget.test.ts
+# read the SAME file, so a term added to one implementation and not the other
+# turns one of the two suites red.
+#
+# The expected values are HAND-COMPUTED and must never be regenerated from
+# either implementation. A generated expectation makes its source definitionally
+# correct: the test would then detect divergence but could never detect that
+# both sides are wrong in the same way. If an implementation disagrees with a
+# case here, the implementation is wrong, not the fixture.
+#
+# The read below is deliberately uncaught and unguarded. There is no skip, no
+# try/except, and no fallback value: a parity test that quietly passes when it
+# cannot find its input is indistinguishable from no parity test at all, which
+# is the exact condition this fixture exists to end.
+
+# Resolved from this file's own location, never from the working directory
+# pytest happened to be invoked from. parents[0] = backend/tests,
+# parents[1] = backend, parents[2] = repo root.
+PARITY_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "frontend" / "src" / "fixtures" / "partial_budget_parity.json"
+)
+
+# Declared here as well as in the file, so that silently shrinking the fixture
+# fails this suite rather than passing quietly with fewer cases.
+EXPECTED_PARITY_CASE_COUNT = 8
+
+_PARITY = json.loads(PARITY_FIXTURE_PATH.read_text(encoding="utf-8"))
+_PARITY_CASES = _PARITY["cases"]
+
+
+def test_parity_fixture_is_internally_consistent():
+    """The fixture carries its own count. A truncated-but-parseable file must
+    fail here rather than silently running fewer cases than it claims."""
+    declared = _PARITY["case_count"]
+    actual = len(_PARITY_CASES)
+    assert declared == actual, (
+        f"{PARITY_FIXTURE_PATH.name}: case_count is {declared} but cases has "
+        f"{actual} entries"
+    )
+    assert actual == EXPECTED_PARITY_CASE_COUNT, (
+        f"{PARITY_FIXTURE_PATH.name}: expected {EXPECTED_PARITY_CASE_COUNT} "
+        f"cases but found {actual}"
+    )
+    assert [c["id"] for c in _PARITY_CASES] == [
+        f"PB-{n}" for n in range(1, EXPECTED_PARITY_CASE_COUNT + 1)
+    ]
+    # field_mapping is executed documentation, not a comment that happens to be
+    # JSON: its values are the input keys every case must actually use.
+    mapped = set(_PARITY["field_mapping"].values())
+    for case in _PARITY_CASES:
+        assert set(case["inputs"]) == mapped, case["id"]
+
+
+@pytest.mark.parametrize(
+    "case", _PARITY_CASES, ids=[c["id"] for c in _PARITY_CASES]
+)
+def test_parity_partial_budget_matches_hand_computed_expectation(case):
+    result = es.partial_budget(**case["inputs"])["net_change_ngn"]
+    # PB-7 is the precision case, so the tolerance is tighter than the rel=1e-4
+    # used elsewhere in this file. Zero expectations compare absolutely, since a
+    # relative tolerance around zero admits nothing.
+    if case["expected"] == 0:
+        assert result == pytest.approx(0.0, abs=1e-9), case["arithmetic"]
+    else:
+        assert result == pytest.approx(case["expected"], rel=1e-9), case["arithmetic"]
+
+
+def test_parity_pb1_sign_is_asserted_separately_from_magnitude():
+    """PB-1 is the sign case. A test that compared only absolute values would
+    pass a reversed implementation, so the sign is asserted on its own."""
+    case = next(c for c in _PARITY_CASES if c["id"] == "PB-1")
+    result = es.partial_budget(**case["inputs"])["net_change_ngn"]
+    assert result < 0
+    assert abs(result) == pytest.approx(21500.0, rel=1e-9)
+    assert result == pytest.approx(-21500.0, rel=1e-9)
+
+
+def test_parity_pb3_exact_zero_is_not_negative_zero():
+    """The boundary between better off and worse off. A negative zero rendering
+    as "-NGN 0.00" would tell a farmer they are worse off when they are exactly
+    even, so 0.0 and -0.0 are distinguished rather than compared for equality
+    (in Python -0.0 == 0.0 is True, which is why copysign is used)."""
+    case = next(c for c in _PARITY_CASES if c["id"] == "PB-3")
+    result = es.partial_budget(**case["inputs"])["net_change_ngn"]
+    assert result == 0
+    assert math.copysign(1.0, result) == 1.0, "net change is negative zero"
