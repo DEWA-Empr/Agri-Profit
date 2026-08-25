@@ -248,8 +248,35 @@ the finding above). Figures are as of 2026-08-25 on `feat/partial-budget-parity`
 | Nothing under `backend/app/ml/` modified | `git diff --stat main...HEAD -- backend/app/ml/` (empty) |
 | `backend/tests/` additions **2194 insertions, 4 deletions** | `git diff --stat main...HEAD -- backend/tests/` |
 | The 4 deletions are an HS256 comment rewrite, not enterprise economics | `git log --oneline -S "Flip the final signature character" main...HEAD -- backend/tests/` → `8690289 fix(bioprocess): water_removed_kg is a water balance…` |
-| Dependency changes on the branch: `pytest-cov`, `@vitest/coverage-v8` | `git diff main...HEAD -- backend/requirements.txt frontend/package.json` · attributed by `git log --oneline main...HEAD -- backend/requirements.txt frontend/package.json` → `ec00162`, `0046b43` |
+| **No dependency added by the enterprise-economics work** | `git diff --stat 502dced..94e554a -- backend/requirements.txt frontend/package.json frontend/package-lock.json` (empty) |
+| Dependency changes on the branch as a whole: `pytest-cov`, `@vitest/coverage-v8` | `git diff main...HEAD -- backend/requirements.txt frontend/package.json` · attributed by `git log --oneline main...HEAD -- backend/requirements.txt frontend/package.json` → `ec00162`, `0046b43` |
 | Parity commit adds no dependency, migration or `ml/` change | `git show --stat 330f1d9 -- backend/requirements.txt frontend/package.json backend/app/ml/ backend/alembic/` (empty) |
+
+### On the baseline for "no new dependency"
+
+The enterprise-economics DoD item **"No new Python or JavaScript dependency"**
+is read against that ticket's own commit range, `502dced..94e554a` (eleven
+commits), where it is clean — not against `main`, where the branch does add
+`pytest-cov` and `@vitest/coverage-v8`.
+
+That is not a loosening. The two packages **predate** the range: `pytest-cov`
+arrives in `0046b43` (bioprocess phase 3) and `@vitest/coverage-v8` in `ec00162`
+(frontend coverage), each closed under its own ticket. And they are load-bearing
+for two other items in the same DoD — without `pytest-cov` the coverage figures
+cannot be produced at all:
+
+```
+$ python -m pytest backend/tests/test_enterprise_service.py -p no:cov --cov=backend/app
+ERROR: python -m pytest: error: unrecognized arguments: --cov=backend/app
+```
+
+`main` carries neither package (`requirements.txt` ends `pytest / httpx`;
+`package.json` has no `test:coverage` script), so coverage is not measurable on
+`main` at all. Read against `main`, the DoD's items "enterprise_service.py at
+100% coverage", "overall backend coverage not below the current 91%" and "no new
+dependency" cannot all hold at once. The DoD settles its own intent by saying
+**"the current 91%"** — a figure that could only have been measured with
+`pytest-cov` already installed. The tooling is assumed present, not forbidden.
 
 ## Seed idempotency — the maize figures are bit-identical
 
