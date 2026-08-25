@@ -1,0 +1,49 @@
+# Line endings. Without this, `core.autocrlf` decides per-clone and every
+# checkout on Windows re-churns the working tree ("LF will be replaced by
+# CRLF" on files nobody edited). Here the repo decides instead, once.
+
+# Default: let git detect text, normalise it to LF in the index, and check it
+# out with LF everywhere — including Windows. Editors handle LF fine; the
+# alternative (`text=auto` alone) leaves the checkout at the mercy of each
+# machine's core.autocrlf.
+* text=auto eol=lf
+
+# Source and config. Listed explicitly rather than left to detection, so a file
+# that happens to start with binary-looking bytes is never mis-guessed.
+*.py     text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.js     text eol=lf
+*.mjs    text eol=lf
+*.css    text eol=lf
+*.html   text eol=lf
+*.svg    text eol=lf
+*.json   text eol=lf
+*.yml    text eol=lf
+*.md     text eol=lf
+*.txt    text eol=lf
+*.ini    text eol=lf
+*.mako   text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.prod text eol=lf
+.gitignore      text eol=lf
+.claudeignore   text eol=lf
+
+# Shell scripts MUST be LF: a CRLF shebang line makes the interpreter path
+# `/usr/bin/env\r`, which fails with a bare "not found" that reads like a
+# missing binary. These run in containers and in git hooks.
+*.sh text eol=lf
+
+# Binaries: never touched, never diffed as text.
+*.png binary
+*.ico binary
+*.pdf binary
+*.woff  binary
+*.woff2 binary
+
+# Generated / large committed artifacts. Still text (they should normalise),
+# but marked so they stay out of diffs and out of language statistics.
+docs/perf/*.json          -diff linguist-generated
+docs/perf/**/*.json       -diff linguist-generated
+docs/perf/*.report.html   -diff linguist-generated
+frontend/package-lock.json -diff linguist-generated
