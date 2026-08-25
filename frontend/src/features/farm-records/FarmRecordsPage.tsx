@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Plus, ClipboardList, Undo2 } from 'lucide-react';
 import { ledgerService } from '../../lib/apiClient';
-import { purgeApiReadCache } from '../../lib/apiCache';
 import type { OperationalLog } from '../../types/domain';
 import { colors } from '../../styles/theme';
 import { EmptyState } from '../../components/EmptyState';
@@ -58,13 +57,12 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
     setReversing(true);
     setReverseError('');
     try {
+      // ledgerService.reverseLog has already dropped the read cache by the
+      // time this resolves, so the refetch below repopulates it with
+      // post-reversal data rather than being served the pre-reversal list the
+      // service worker held (vite.config.ts caches /ledger, /reports and the
+      // /dss reads StaleWhileRevalidate).
       await ledgerService.reverseLog(pendingReversal.id);
-      // The service worker caches /ledger and /reports GETs StaleWhileRevalidate
-      // (vite.config.ts), so an immediate refetch would serve the pre-reversal
-      // list from cache. Drop the read cache first: the refetch below then
-      // repopulates it with post-reversal data, and the dashboard's summary and
-      // P&L reads are correct on the next visit too.
-      await purgeApiReadCache();
       setPendingReversal(null);
       fetchLogs();
       onRecordChange?.();
@@ -74,11 +72,9 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
         // Raced with another device, or the original's reversal was outside our
         // page. Re-read so the row picks up its real state.
         setReverseError('This record has already been reversed, or is itself a reversal. Refreshing your records…');
-        await purgeApiReadCache();
         fetchLogs();
       } else if (status === 404) {
         setReverseError('That record could not be found. Refreshing your records…');
-        await purgeApiReadCache();
         fetchLogs();
       } else if (!isOnline) {
         setReverseError('You are offline. Reversals need a connection — this one has not been saved.');

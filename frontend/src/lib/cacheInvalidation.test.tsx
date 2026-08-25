@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { AxiosHeaders, type AxiosAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
-import api, { dssService } from './apiClient'
+import api, { dssService, ledgerService } from './apiClient'
 import { saveOperationalLog } from './logs'
 import { flushPendingLogs } from './sync'
 import { API_READ_CACHE } from './apiCacheConfig'
@@ -14,7 +14,7 @@ import { EnterpriseEconomics } from '../features/dss/components/EnterpriseEconom
 import { MaintenancePanel } from '../features/equipment/components/MaintenancePanel'
 import EquipmentPage from '../features/equipment/EquipmentPage'
 
-// Phase 6b: the four farm-scoped write paths must leave no cached derived read
+// Phase 6b: the five farm-scoped write paths must leave no cached derived read
 // behind them.
 //
 // WHY THESE TESTS RUN AGAINST A STAND-IN SERVICE WORKER RATHER THAN A SPY.
@@ -24,7 +24,8 @@ import EquipmentPage from '../features/equipment/EquipmentPage'
 // two halves the staleness actually needs — a Cache Storage the real purge
 // deletes by name, and a read path that prefers a cached entry over the network
 // — and every test seeds a real cache entry, mutates, then reads again. Replace
-// purgeApiReadCache with a no-op and all four fail on the value, not the call.
+// purgeApiReadCache with a no-op and all five fail on the value, not the call
+// (the exact edit, command and expected failures are in docs/EVIDENCE.md).
 //
 // The harness models the SERVE half of StaleWhileRevalidate (a cache hit wins,
 // which is the half that goes stale) and deliberately not the background
@@ -51,16 +52,32 @@ const readCache = () => {
 // real /dss endpoints are. Nothing here is a canned response: a write changes
 // the state and every read recomputes off it, so a stale figure can only have
 // come from the cache.
+// A stored log carries the id the server assigned it, and `reverses_id` when it
+// is a contra — the two fields the reversal arithmetic below needs.
+type StoredLog = OperationalLogCreate & { id: number; reverses_id: number | null }
+
 const server = {
-  logs: [] as OperationalLogCreate[],
+  logs: [] as StoredLog[],
   equipment: [] as Equipment[],
   maintenance: [] as MaintenanceLog[],
 }
 
+// A contra carries no crop of its own, so it is attributed to the crop of the
+// log it reverses — the same resolution dss_service.py does through its
+// crop_by_id map (backend/app/services/dss_service.py, _crop_buckets).
+const cropOf = (log: StoredLog) =>
+  log.reverses_id == null
+    ? log.crop
+    : server.logs.find((original) => original.id === log.reverses_id)?.crop
+
+// A reversal is posted with the SAME transaction_type, amount and category as
+// its original (ledger_service.reverse_log) and is SUBTRACTED from the bucket
+// that type feeds, so a reversed expense returns Operating Cost to what it was
+// rather than inflating revenue.
 const spendOnCrop = (crop: string) =>
   server.logs
-    .filter((log) => log.crop === crop && log.financial_data.transaction_type === 'debit')
-    .reduce((total, log) => total + log.financial_data.amount, 0)
+    .filter((log) => cropOf(log) === crop && log.financial_data.transaction_type === 'debit')
+    .reduce((total, log) => total + (log.reverses_id == null ? 1 : -1) * log.financial_data.amount, 0)
 
 const maintenanceCost = () =>
   server.maintenance.reduce((total, log) => total + (log.cost ?? 0), 0)
@@ -148,8 +165,22 @@ function route(method: string, url: string, body: unknown): unknown {
   if (method === 'post') {
     if (url.endsWith('/ledger/logs')) {
       const payload = body as OperationalLogCreate
-      server.logs.push(payload)
-      return { id: server.logs.length, activity_type: payload.activity_type, timestamp: new Date().toISOString() }
+      const created = { ...payload, id: server.logs.length + 1, reverses_id: null }
+      server.logs.push(created)
+      return { id: created.id, activity_type: payload.activity_type, timestamp: new Date().toISOString() }
+    }
+    const toReverse = /\/ledger\/logs\/(\d+)\/reverse$/.exec(url)
+    if (toReverse) {
+      const original = server.logs.find((log) => log.id === Number(toReverse[1]))
+      if (!original) throw new Error(`No log ${toReverse[1]} to reverse`)
+      const contra: StoredLog = {
+        ...original,
+        id: server.logs.length + 1,
+        crop: undefined, // a contra carries no crop, exactly as the backend posts it
+        reverses_id: original.id,
+      }
+      server.logs.push(contra)
+      return { id: contra.id, activity_type: contra.activity_type, reverses_id: contra.reverses_id, timestamp: new Date().toISOString() }
     }
     if (url.endsWith('/equipment/maintenance')) {
       const payload = body as MaintenanceLog
@@ -328,5 +359,28 @@ describe('logging maintenance invalidates the cached cost structure', () => {
     const structure = (await dssService.getCostStructure()).data.crops[0]
     expect(structure.semi_variable_cost).toBe(12000)
     expect(structure.cash_cost).toBe(12000)
+  })
+})
+
+describe('a reversal invalidates the cached derived reads', () => {
+  it('serves the netted figure on the next DSS read instead of the pre-reversal cache', async () => {
+    // Two expenses against the same crop, so the netted figure is a value
+    // neither the pre-reversal cache (5,500) nor an empty ledger (0) can
+    // produce — 2,000 is only reachable if the contra is visible AND the
+    // second log survived it.
+    await ledgerService.createLog(seedLog(3500))
+    await ledgerService.createLog(seedLog(2000))
+
+    // Seed: the read a user took before correcting the mistake, cached with it.
+    expect((await dssService.getDecisionSupport()).data.crops[0].expenses).toBe(5500)
+    expect(readCache().size).toBe(1)
+
+    // The purge under test lives in ledgerService.reverseLog, not in
+    // FarmRecordsPage — the page now only refetches (Phase 6c item 1), so this
+    // is the level the freshness claim belongs at.
+    await ledgerService.reverseLog(1)
+
+    // The 3,500 has been offset; the 2,000 has not.
+    expect((await dssService.getDecisionSupport()).data.crops[0].expenses).toBe(2000)
   })
 })

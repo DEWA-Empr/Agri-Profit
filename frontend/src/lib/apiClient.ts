@@ -123,7 +123,29 @@ export const ledgerService = {
   // Post an offsetting entry for a mistaken log. Ledger records are immutable —
   // this is the only correction mechanism. 409 if the target is itself a
   // reversal or has already been reversed; 404 if it isn't this farm's.
-  reverseLog: (id: number) => api.post<OperationalLog>(`/ledger/logs/${id}/reverse`),
+  //
+  // The purge lives here, not in the page, for the same reason it does in
+  // createLog: a reversal changes the ledger, the P&L and all four cached /dss
+  // reads at once, and every caller of this method would otherwise have to
+  // remember that. Purge on 2xx, and on 409 and 404 too — both mean the server
+  // holds a state the cached reads were not built from (the target is already
+  // reversed, is itself a contra, or is not this farm's row at all), so the
+  // caller's refetch must not be served the pre-mutation body. Every other
+  // failure — offline, timeout, 5xx — leaves the ledger untouched, and there is
+  // nothing to invalidate.
+  reverseLog: async (id: number) => {
+    try {
+      const res = await api.post<OperationalLog>(`/ledger/logs/${id}/reverse`);
+      await purgeApiReadCache();
+      return res;
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 409 || status === 404) {
+        await purgeApiReadCache();
+      }
+      throw err;
+    }
+  },
 };
 
 // Read-only. Drying runs are CREATED through ledgerService.createLog with a
