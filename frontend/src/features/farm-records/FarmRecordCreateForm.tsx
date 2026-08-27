@@ -3,6 +3,7 @@ import { Save } from 'lucide-react';
 import type { Category, TransactionType, OperationalLogCreate } from '../../types/domain';
 import { saveOperationalLog } from '../../lib/logs';
 import { useCropOptions } from './useCropOptions';
+import { validateRecord } from './recordBounds';
 import { normaliseCrop } from './cropOptions';
 import { colors } from '../../styles/theme';
 import { DryingFields } from './DryingFields';
@@ -90,9 +91,16 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
-    // Validate the drying payload BEFORE anything is queued: an invalid one is
-    // a permanent 422, and a permanent 422 in the offline queue is a record
-    // that can never sync.
+    // Validate BEFORE anything is queued: an invalid record is a permanent 422,
+    // and a permanent 422 in the offline queue is a record that can never sync —
+    // it retries three times and is stranded. Money and quantity are checked
+    // first because they are on every record; the drying payload follows.
+    const boundsError = validateRecord({ amount: form.amount, quantity: form.quantity });
+    if (boundsError) {
+      setMessage(boundsError);
+      return;
+    }
+
     let extraData: Record<string, unknown> | undefined;
     if (isDrying) {
       const built = buildDryingParams(drying);

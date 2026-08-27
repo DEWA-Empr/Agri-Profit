@@ -2,7 +2,10 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+import math
+
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -68,6 +71,48 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _json_safe(value):
+    """Make a validation-error payload serialisable.
+
+    FastAPI's 422 body echoes the offending input back to the caller. That is
+    useful until the input is exactly what the new bounds exist to reject: a
+    non-finite float. `json.dumps` refuses to encode inf/NaN, so the default
+    handler raised while rendering the error and the caller received a 500 —
+    which is how a correctly REJECTED value still produced the wrong answer.
+
+    Non-finite floats become their name as a string; everything else is
+    returned unchanged, so ordinary validation errors read exactly as before.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)          # 'inf', '-inf', 'nan'
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(request: Request, exc: RequestValidationError):
+    """Return a 422 that can always be rendered.
+
+    Also drops the `ctx` field each Pydantic error carries: it can hold the
+    originating exception object, whose repr is an implementation detail of the
+    validator rather than anything a client can act on.
+    """
+    errors = [
+        _json_safe({k: v for k, v in error.items() if k != "ctx"})
+        for error in exc.errors()
+    ]
+    return JSONResponse(
+        # The literal, not status.HTTP_422_*: Starlette renamed that constant
+        # (ENTITY -> CONTENT) and importing either name pins this file to a
+        # version window for no benefit. The number is stable.
+        status_code=422,
+        content={"detail": errors},
+    )
 
 
 @app.exception_handler(AppError)

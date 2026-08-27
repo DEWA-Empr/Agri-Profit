@@ -1,9 +1,64 @@
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator, ValidationError
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Any, Dict, List, Literal
+from typing import Annotated, Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
 from ..core.roles import Role
+
+# --- Domain bounds on user-supplied numbers -------------------------------
+#
+# WHAT WAS WRONG. Money and quantity arrived as bare `float`, which accepted
+# three things the domain has no meaning for, each demonstrated against the
+# running API before this was written:
+#
+#   1. NEGATIVE AMOUNTS. Sign is carried by `transaction_type`, so a debit of
+#      -1,000,000 is an expense that ADDS to profit. A farm recording revenue of
+#      50,000 and that one entry reported a gross margin of 1,050,000. Every
+#      other integrity control on this ledger — no deletes, contra-only
+#      corrections, a full audit trail — protects the HISTORY of an entry and
+#      none of them protects its VALUE, so a P&L presented to a lender could be
+#      inflated without leaving a mark. This is the bound that matters.
+#
+#   2. NON-FINITE VALUES. Pydantic accepts `Infinity` and `NaN` for a float by
+#      default. An infinite amount was stored and turned the farm's gross margin
+#      into null; because the ledger cannot delete, that farm's P&L could not be
+#      repaired through the API at all. NaN reached the database and surfaced as
+#      an unhandled 500.
+#
+#   3. ABSURD MAGNITUDES. 1e308 was accepted, which is a fat-fingered entry that
+#      no reading of the figures would survive.
+#
+# WHY THESE CEILINGS. They are set to catch mistakes and attacks, not to second-
+# guess a farmer. MAX_NAIRA is roughly five times the price of a new combine
+# harvester, so no single legitimate farm transaction approaches it while an
+# extra three zeros is caught. MAX_QUANTITY is a thousand tonnes in one record.
+# Both are named constants precisely so a department that outgrows them changes
+# one line rather than hunting through field definitions.
+#
+# GE, NOT GT, ON BOTH. Zero is a real value here and the platform already relies
+# on it: sun drying with the farm's own labour costs nothing, so a drying run is
+# routinely recorded at 0.00 and still posts its paired transaction, and a failed
+# harvest is a genuine zero yield. `gt=0` would reject both.
+MAX_NAIRA = 1_000_000_000.0     # ₦1bn — far above any single farm transaction
+MAX_QUANTITY = 1_000_000.0      # 1,000 t in one record, in the crop's own unit
+
+# Naira. Non-negative because direction is `transaction_type`'s job, finite
+# because an aggregate poisoned by an infinity cannot be repaired on an
+# append-only ledger, and bounded because a fat-finger should not become a
+# lender-facing figure.
+Money = Annotated[float, Field(ge=0, le=MAX_NAIRA, allow_inf_nan=False)]
+OptionalMoney = Annotated[Optional[float], Field(default=None, ge=0, le=MAX_NAIRA, allow_inf_nan=False)]
+
+# A physical amount in the crop's own unit — kilograms, bags, litres, hours.
+# The unit is free text on the same record, so this cannot be normalised here;
+# the bound is on magnitude alone.
+Quantity = Annotated[Optional[float], Field(default=None, ge=0, le=MAX_QUANTITY, allow_inf_nan=False)]
+
+# Free text the user types. Bounded so a single record cannot carry a payload
+# into a column with no width limit; the ceilings are far above any real entry.
+ShortText = Annotated[Optional[str], Field(default=None, max_length=120)]
+LabelText = Annotated[Optional[str], Field(default=None, max_length=64)]
+LongText = Annotated[Optional[str], Field(default=None, max_length=2000)]
 
 # The role vocabulary at the API edge IS core.roles.Role — not a copy of its
 # values. A Literal listing them here would be a second place to update, and the
@@ -19,7 +74,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, description="At least 8 characters")
     # Optional: a new tenant's display name; defaults to "<email>'s Farm".
-    farm_name: Optional[str] = None
+    farm_name: ShortText = None
 
 class LoginRequest(BaseModel):
     # Plain str on purpose: login must not distinguish "malformed email" from
@@ -84,11 +139,14 @@ class MemberOut(BaseModel):
 
 # --- Financial Transaction Schemas ---
 class FinancialTransactionBase(BaseModel):
-    amount: float
+    # Money, bounded and finite. Direction lives in `transaction_type`, so a
+    # negative amount is not "a refund" — it is a debit that adds to profit.
+    # See the Money definition at the top of this module.
+    amount: Money
     transaction_type: TransactionType
     category: Category
-    description: Optional[str] = None
-    tax_category: Optional[str] = None
+    description: LongText = None
+    tax_category: LabelText = None
 
 class FinancialTransactionCreate(FinancialTransactionBase):
     pass
@@ -234,12 +292,18 @@ def cost_behaviour_for(
 # --- Operational Log Schemas ---
 class OperationalLogBase(BaseModel):
     activity_type: Category
-    description: Optional[str] = None
-    quantity: Optional[float] = None
-    unit: Optional[str] = None
-    crop: Optional[str] = None
+    description: LongText = None
+    # Physical output/input in the crop's own unit. Non-negative: a negative
+    # yield would make unit cost of production negative, and unit cost is the
+    # figure a farmer prices against. Zero is allowed — a failed harvest is a
+    # real, recordable zero.
+    quantity: Quantity = None
+    unit: LabelText = None
+    crop: LabelText = None
     extra_data: Optional[Dict[str, Any]] = None
-    client_id: Optional[str] = None
+    # Client-generated idempotency key. Bounded because it is an index key: an
+    # unbounded string here is an unbounded index entry.
+    client_id: Annotated[Optional[str], Field(default=None, max_length=128)] = None
 
 class OperationalLogCreate(OperationalLogBase):
     financial_data: FinancialTransactionCreate
@@ -281,10 +345,14 @@ class OperationalLog(OperationalLogBase):
 
 # --- Equipment Schemas ---
 class EquipmentBase(BaseModel):
-    name: str
-    model: Optional[str] = None
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+    model: ShortText = None
     purchase_date: Optional[datetime] = None
-    purchase_price: Optional[float] = None
+    # Drives the depreciation overlay, which drives allocated fixed cost, which
+    # drives the break-even price to cover total cost. A negative purchase price
+    # would propagate a negative charge through all three, and equipment cannot
+    # be corrected once entered without the edit route added in this same cycle.
+    purchase_price: OptionalMoney = None
     # PERCENTAGE, not a fraction: 10.0 is 10%/yr. Validated only when present,
     # the same nullable-but-bounded shape as MechanizationParams.hours_used —
     # an asset may legitimately carry no rate, and one that does is excluded
@@ -400,8 +468,10 @@ class DSSDecisionSupport(BaseModel):
 # --- Maintenance Log Schemas ---
 class MaintenanceLogBase(BaseModel):
     equipment_id: int
-    description: Optional[str] = None
-    cost: Optional[float] = None
+    description: LongText = None
+    # Maintenance cost enters the ledger's expense side through the equipment
+    # report, so it takes the same bounds as any other money on this platform.
+    cost: OptionalMoney = None
 
 class MaintenanceLogCreate(MaintenanceLogBase):
     pass
@@ -413,7 +483,7 @@ class MaintenanceLog(MaintenanceLogBase):
 
 # --- Investor share-link Schemas (ticket 05) ---
 class ShareLinkCreate(BaseModel):
-    label: Optional[str] = None
+    label: ShortText = None
     # How long the new link should work for. Omitted means the configured
     # default (Settings.share_link_default_ttl_days). There is deliberately no
     # way to mint a link that never expires: a bearer credential to a farm's
@@ -626,10 +696,10 @@ class SensitivityResponse(BaseModel):
 class PartialBudgetRequest(BaseModel):
     """Four quantities, all required and all non-negative: the sign of the
     appraisal lives in which slot a quantity occupies, not in the number."""
-    added_revenue_ngn: float = Field(..., ge=0)
-    reduced_cost_ngn: float = Field(..., ge=0)
-    lost_revenue_ngn: float = Field(..., ge=0)
-    added_cost_ngn: float = Field(..., ge=0)
+    added_revenue_ngn: Money
+    reduced_cost_ngn: Money
+    lost_revenue_ngn: Money
+    added_cost_ngn: Money
 
 
 class PartialBudgetResponse(PartialBudgetRequest):
