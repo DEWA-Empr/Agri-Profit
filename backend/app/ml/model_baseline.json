@@ -30,5 +30,39 @@
     "r2": 0.0005,
     "mae": 0.0005,
     "rmse": 0.0005
-  }
+  },
+  "binding_environment": {
+    "_why": "The packages whose version actually moves the metrics, and therefore the ones the reproducibility test gates on. scikit-learn decides tree construction and its RNG draw; numpy is the RNG and the float arithmetic underneath it. Python's own minor version and pandas' patch version were MEASURED not to move them (see verified_environments), so gating on those made the test skip everywhere except one laptop -- including in CI, where the figures were therefore never checked at all.",
+    "packages": [
+      "scikit-learn",
+      "numpy"
+    ]
+  },
+  "verified_environments": [
+    {
+      "_role": "Recording environment (the machine the metrics above were measured on).",
+      "python": "3.14.5",
+      "scikit-learn": "1.9.0",
+      "numpy": "2.4.6",
+      "pandas": "3.0.3",
+      "measured": {
+        "r2": 0.976204,
+        "mae": 0.241393,
+        "rmse": 0.488334
+      }
+    },
+    {
+      "_role": "Deployment environment (python:3.11-slim, the backend Dockerfile base, with backend/requirements.txt resolved fresh). Measured by running the generator and the training pipeline inside that image.",
+      "python": "3.11.15",
+      "scikit-learn": "1.9.0",
+      "numpy": "2.4.6",
+      "pandas": "3.0.5",
+      "measured": {
+        "r2": 0.976204,
+        "mae": 0.241393,
+        "rmse": 0.488334
+      }
+    }
+  ],
+  "_cross_environment_result": "The two environments above differ in Python minor (3.14 vs 3.11) and pandas patch (3.0.3 vs 3.0.5) and agree on scikit-learn and numpy. The dataset fingerprint is byte-identical between them, and the three metrics agree to six decimal places -- not merely within the tolerance below. That is the evidence for treating scikit-learn and numpy as the binding packages."
 }

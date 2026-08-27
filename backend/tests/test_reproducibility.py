@@ -64,12 +64,38 @@ def _current_environment():
 
 
 def _environment_matches(baseline) -> tuple[bool, str]:
+    """Is this environment one the recorded metrics are claimed for?
+
+    GATES ON THE BINDING PACKAGES ONLY — scikit-learn and numpy — rather than on
+    every version string in the record.
+
+    It previously required an exact match on all four, Python patch version
+    included. That was stricter than the evidence: it meant the metric assertion
+    ran on exactly one laptop and SKIPPED everywhere else, CI included. A check
+    that never executes in CI protects nothing there, and the skip was silent,
+    so the recorded R²/MAE/RMSE were in practice unverified by any automated
+    run except a local one.
+
+    The narrower gate is measured, not assumed. The same generator and pipeline
+    were run inside python:3.11-slim — the backend Dockerfile's base, with
+    requirements.txt resolved fresh — giving Python 3.11.15 and pandas 3.0.5
+    against the recording machine's 3.14.5 and 3.0.3, with scikit-learn and
+    numpy identical. The dataset fingerprint came out byte-identical and all
+    three metrics agreed to six decimal places. Both runs are recorded under
+    `verified_environments` in model_baseline.json.
+
+    So Python's minor version and pandas' patch version demonstrably do not move
+    these numbers, while scikit-learn's tree construction and numpy's RNG are
+    the things that would. A scikit-learn or numpy change still skips, which is
+    the case the original gate was written for and it is preserved exactly.
+    """
     recorded = baseline["environment"]
     current = _current_environment()
+    binding = baseline["binding_environment"]["packages"]
     differences = [
         f"{pkg}: recorded {recorded[pkg]}, running {current[pkg]}"
-        for pkg in current
-        if recorded.get(pkg) != current[pkg]
+        for pkg in binding
+        if recorded.get(pkg) != current.get(pkg)
     ]
     return (not differences), "; ".join(differences)
 
@@ -216,3 +242,88 @@ def test_the_bounds_the_api_validates_against_match_the_generator():
         limits = {type(c).__name__: getattr(c, "ge", getattr(c, "le", None)) for c in constraints}
         assert low in limits.values(), f"{feature} lower bound drifted from the generator"
         assert high in limits.values(), f"{feature} upper bound drifted from the generator"
+
+
+# --- the environment gate itself -----------------------------------------
+# The gate decides whether the metric assertion runs at all, so a mistake in it
+# is invisible: the suite stays green by skipping the one test that checks the
+# reported figures. These pin its behaviour in both directions.
+
+def test_the_binding_packages_are_the_ones_that_move_the_numbers(baseline):
+    """scikit-learn and numpy, and deliberately not Python or pandas.
+
+    Recorded in the baseline rather than written here so the policy and the
+    evidence for it (`verified_environments`) sit in one artefact.
+    """
+    binding = baseline["binding_environment"]["packages"]
+    assert set(binding) == {"scikit-learn", "numpy"}
+
+
+def test_the_recorded_environments_agree_on_the_binding_packages(baseline):
+    """The cross-environment evidence only supports the narrower gate if the two
+    runs actually differed in the non-binding versions and agreed on the binding
+    ones. If someone edits that record into two identical rows, it stops being
+    evidence of anything and this fails."""
+    environments = baseline["verified_environments"]
+    assert len(environments) >= 2
+
+    for pkg in baseline["binding_environment"]["packages"]:
+        versions = {env[pkg] for env in environments}
+        assert len(versions) == 1, f"{pkg} differs across the verified environments"
+
+    # And they must differ somewhere, or the comparison proves nothing.
+    non_binding = {"python", "pandas"}
+    assert any(
+        len({env[pkg] for env in environments}) > 1 for pkg in non_binding
+    ), "the verified environments are identical; they demonstrate no portability"
+
+
+def test_every_verified_environment_agrees_with_the_published_metrics(baseline):
+    """Each recorded measurement must sit inside the published tolerance of the
+    headline figures. This is what stops `verified_environments` drifting into a
+    list of runs that quietly disagree with the number being reported."""
+    for env in baseline["verified_environments"]:
+        for metric, published in baseline["metrics"].items():
+            measured = env["measured"][metric]
+            tolerance = baseline["tolerance"][metric]
+            assert measured == pytest.approx(published, abs=tolerance), (
+                f"{env['_role']}: {metric} measured {measured}, published {published}"
+            )
+
+
+def test_the_gate_still_skips_when_a_binding_package_differs(baseline):
+    """The narrowing must not have turned the gate off. A scikit-learn change is
+    exactly the case the skip exists for."""
+    import copy
+    altered = copy.deepcopy(baseline)
+    altered["environment"]["scikit-learn"] = "0.0.0-not-a-real-version"
+
+    matches, differences = _environment_matches(altered)
+
+    assert matches is False
+    assert "scikit-learn" in differences
+
+
+def test_the_gate_ignores_a_python_or_pandas_difference(baseline):
+    """The measured result: these do not move the figures, so they must not
+    suppress the assertion."""
+    import copy
+    altered = copy.deepcopy(baseline)
+    altered["environment"]["python"] = "3.11.15"
+    altered["environment"]["pandas"] = "3.0.5"
+
+    matches, _ = _environment_matches(altered)
+
+    assert matches is True
+
+
+def test_the_metric_assertion_actually_runs_in_this_environment(baseline):
+    """The point of the whole exercise: on any supported environment — this
+    machine, CI, or the container — the figures are CHECKED rather than skipped
+    past. If this fails, the environment has moved off the binding versions and
+    the baseline needs re-measuring, not the gate re-loosening."""
+    matches, differences = _environment_matches(baseline)
+    assert matches, (
+        "the reported metrics are not being verified in this environment: "
+        f"{differences}. Re-measure the baseline rather than widening the gate."
+    )
