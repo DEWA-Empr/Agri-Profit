@@ -1,5 +1,11 @@
 name: CI
 
+# Validation runs on every pull request and on main. There is no deployment job
+# here on purpose: this repository builds and verifies, and a departmental
+# deployment is a deliberate act performed against docs/DEPLOYMENT.md, not
+# something that happens because a branch moved. See that document for the
+# release procedure and the rollback step.
+
 on:
   push:
     branches: [main]
@@ -28,6 +34,55 @@ jobs:
           DATABASE_URL: sqlite:///./test.db
         run: python -m pytest backend/tests/ -v
 
+      - name: Coverage
+        env:
+          DATABASE_URL: sqlite:///./test.db
+        run: python -m pytest backend/tests/ -q --cov=backend/app --cov-report=term
+
+  migrations:
+    name: Migration chain (PostgreSQL)
+    runs-on: ubuntu-latest
+
+    # The rest of the suite builds its schema with Base.metadata.create_all,
+    # which is blind to Alembic — so without this job a broken migration keeps
+    # CI green and fails on the next deployment instead. It runs against real
+    # PostgreSQL because the chain uses ALTER-constraint operations that SQLite
+    # does not support; that is a property of the migrations, not a gap in them.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agriprofit_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Verify the chain runs, matches the models, and rolls back
+        env:
+          # A throwaway database created by the service above. The fixture drops
+          # and recreates the schema around every test.
+          MIGRATION_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agriprofit_migrations
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agriprofit_migrations
+        run: python -m pytest backend/tests/test_migrations.py -v
+
   frontend:
     name: Frontend tests & build
     runs-on: ubuntu-latest
@@ -49,6 +104,68 @@ jobs:
         working-directory: frontend
         run: npm run test
 
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
       - name: Type-check and build
         working-directory: frontend
         run: npm run build
+
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      # The security boundaries are asserted by tests rather than by a scanner,
+      # because a scanner cannot tell whether a 403 is the RIGHT 403. These are
+      # already covered by the backend job; running them again on their own means
+      # a failure here names the boundary that broke instead of being one line in
+      # a 360-test log.
+      - name: Authorization, token handling and input bounds
+        env:
+          DATABASE_URL: sqlite:///./test.db
+        run: |
+          python -m pytest -v \
+            backend/tests/test_authorization.py \
+            backend/tests/test_logging_safety.py \
+            backend/tests/test_rate_limit.py \
+            backend/tests/test_share_lifecycle.py \
+            backend/tests/test_input_validation.py
+
+      - name: Known vulnerabilities in dependencies
+        # Advisory: it reports against the installed set and is allowed to fail
+        # the step without failing the run, because a new advisory published
+        # overnight should raise a flag, not block an unrelated pull request.
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit --requirement backend/requirements.txt --strict || true
+
+      - name: No secrets committed
+        # A narrow, high-signal check: the two shapes this repository could
+        # plausibly leak. Not a general scanner — one of those belongs in the
+        # organisation's tooling, not in a project CI file where it would mostly
+        # produce noise.
+        run: |
+          set -e
+          if git ls-files -z | xargs -0 grep -lE '^\s*SECRET_KEY\s*=\s*["'"'"'][^"'"'"']{16,}' -- 2>/dev/null | grep -v '.env.example'; then
+            echo "::error::A SECRET_KEY literal appears to be committed."
+            exit 1
+          fi
+          if git ls-files | grep -qE '(^|/)\.env$'; then
+            echo "::error::A .env file is tracked. Secrets must come from the environment."
+            exit 1
+          fi
+          echo "No committed secrets found."
