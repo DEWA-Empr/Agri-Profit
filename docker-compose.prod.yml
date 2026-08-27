@@ -119,7 +119,15 @@ services:
     restart: unless-stopped
     profiles: [edge]
     environment:
-      CADDY_DOMAIN: ${CADDY_DOMAIN:?set CADDY_DOMAIN to the public hostname}
+      # NO `:?` GUARD HERE, deliberately. Compose interpolates every service in
+      # the file even when its profile is not selected, so a `${VAR:?...}` on
+      # this optional service made the ordinary deployment command
+      # (`up -d --build`, no --profile) fail for everyone who terminates TLS
+      # somewhere else — which docs/DEPLOYMENT.md says most departments do.
+      # Empty is safe: it only reaches Caddy when `--profile edge` is passed,
+      # and Caddy refuses to start on an empty site address, so opting into the
+      # edge without setting the hostname still fails loudly and immediately.
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-}
     ports:
       - "80:80"
       - "443:443"

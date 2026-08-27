@@ -121,6 +121,60 @@ def test_the_head_matches_the_newest_migration_on_disk(script):
     assert any(head in f for f in files), f"head {head} has no file in versions/"
 
 
+def test_alembic_env_imports_from_any_working_directory(tmp_path):
+    """`alembic/env.py` must import `app` no matter where alembic was started.
+
+    THIS IS A REGRESSION TEST FOR A REAL BREAKAGE. alembic.ini carries
+    `prepend_sys_path = .`, which alembic resolves against the CURRENT WORKING
+    DIRECTORY rather than against the ini file's location. That is correct only
+    when alembic is invoked from inside backend/ — which the container does, so
+    production was unaffected. But this suite and the CI migrations job both run
+    pytest from the repository root, where `.` is the repo and `app` is one
+    directory further down, so `from app.models.models import Base` raised
+    ModuleNotFoundError and every Tier 2 test below failed on collection. The
+    chain had therefore never actually been executed anywhere, CI included.
+
+    env.py now prepends its own backend/ directory to sys.path, which makes the
+    invocation directory irrelevant. This test needs no database and runs
+    everywhere, so a reintroduction is caught on a developer's machine instead
+    of only in the one CI job that has PostgreSQL attached.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    env_py = os.path.join(BACKEND_DIR, "alembic", "env.py")
+
+    # env.py's later lines call into alembic's `context`, which only exists when
+    # alembic itself is driving the module. The part under test is the prologue
+    # — the sys.path setup and the model import — so the child executes exactly
+    # that and stops at the first line that needs alembic.
+    child = textwrap.dedent(
+        """
+        import sys
+        source = open(sys.argv[1], encoding="utf-8").read()
+        prologue = source.split("config = context.config")[0]
+        exec(compile(prologue, sys.argv[1], "exec"), {"__file__": sys.argv[1]})
+        print("IMPORT_OK")
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", child, env_py],
+        # Neither backend/ nor anywhere `app` is importable by accident: a
+        # scratch directory, so only env.py's own sys.path work can succeed.
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+
+    assert "IMPORT_OK" in result.stdout, (
+        "alembic/env.py could not import the application when alembic is run "
+        "from a directory other than backend/.\n"
+        "stdout: " + result.stdout + "\nstderr: " + result.stderr
+    )
+
+
 # --- Tier 2: the chain actually runs (PostgreSQL) -------------------------
 
 @pytest.fixture

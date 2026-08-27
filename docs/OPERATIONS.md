@@ -102,12 +102,31 @@ curl -fsS https://your-host/health/ready
 Stopping the backend first is not optional. A restore into a database the
 application is still writing to produces a mixture of two states.
 
-> **Verification status.** The scripts are written and syntax-checked, and the
-> procedure above is the one to follow. **A restore has NOT been executed
-> against a real database in this environment** — no Docker or PostgreSQL was
-> available on the machine where this work was done. Until you have run the §3
-> rehearsal and seen the counts, the backup story is documented, not verified.
-> Do that before the system carries real farm data.
+> **Verification status — rehearsal executed 2026-08-28.** Both scripts have now
+> been run end to end against a real PostgreSQL 15 database (the `db` service of
+> `docker-compose.prod.yml`), not merely syntax-checked.
+>
+> What was done: migrations were applied to an empty database with
+> `alembic upgrade head`, representative data was seeded (2 farms, 3 users at
+> all three roles, 5 operational logs each paired to a financial transaction,
+> 1 equipment asset), `ops/backup.sh` produced a 27,800-byte custom-format dump
+> and verified it listed 8 tables with data, and `ops/restore.sh` restored that
+> dump into the scratch database.
+>
+> What the rehearsal showed:
+>
+> | Check | Result |
+> |---|---|
+> | farms / users / operational_logs / financial_transactions / equipment | 2 / 3 / 5 / 5 / 1 — every count matched the source exactly |
+> | `alembic_version` in the restored database | `b9e5f30c74a1` — the chain head |
+> | Unpaired operational logs (the paired-write invariant) | 0 |
+> | Live `agriprofit` database after the rehearsal | untouched (5 logs, as before) |
+> | Scratch database afterwards | dropped |
+>
+> The backup is therefore verified as restorable, not merely documented. Re-run
+> the §3 rehearsal monthly, on the real data, and record the date and counts —
+> a restore verified against seeded data proves the mechanism, not this month's
+> backup file.
 
 ## 4. Logging
 

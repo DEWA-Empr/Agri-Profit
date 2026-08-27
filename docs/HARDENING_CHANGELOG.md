@@ -98,6 +98,11 @@ Not applied here. Listed so they are not missed.
   now are the same tests, unchanged, that passed before.
 - No independent security review, no load or soak testing, no field trial, no
   user evaluation.
-- **No restore executed against a real database.** No Docker or PostgreSQL was
-  available in this environment. The scripts are written and syntax-checked and
-  the procedure is documented; run `docs/OPERATIONS.md` §3 before trusting it.
+- ~~No restore executed against a real database.~~ **Closed 2026-08-28.** Docker
+  and PostgreSQL 15 were available in a later session; `ops/backup.sh` and
+  `ops/restore.sh` were run end to end against the `docker-compose.prod.yml`
+  `db` service. Every row count matched the source, `alembic_version` restored
+  to the chain head, the paired-write invariant held at 0 unpaired logs, and the
+  live database was untouched. See `docs/OPERATIONS.md` §3 for the recorded
+  result. The mechanism is verified; the monthly rehearsal against real data is
+  still the standing requirement.

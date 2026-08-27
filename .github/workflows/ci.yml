@@ -169,3 +169,64 @@ jobs:
             exit 1
           fi
           echo "No committed secrets found."
+
+  deployment:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+
+    # The production compose file is the deployment. Nothing else in this
+    # workflow reads it, so a change that makes `up -d` refuse to start was
+    # invisible here until somebody tried to deploy — which is the worst moment
+    # to find out. These checks are cheap and need no images built.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The documented deploy command renders with only .env.example set
+        # REGRESSION GUARD. Compose interpolates EVERY service in the file, even
+        # ones behind a profile that is not selected. A `${VAR:?...}` on the
+        # optional `caddy` service therefore broke the ordinary deployment
+        # command for every department that terminates TLS elsewhere — which
+        # docs/DEPLOYMENT.md says most of them do. Rendering the file with no
+        # profile selected catches that class of mistake.
+        run: |
+          set -e
+          # The values a real deployment supplies, and nothing more. If a
+          # service outside the `edge` profile grows a new required variable,
+          # this fails until .env.example documents it too.
+          cat > .env <<'ENV'
+          ENVIRONMENT=production
+          SECRET_KEY=ci-placeholder-not-a-real-key
+          DATABASE_URL=postgresql://agriprofit:placeholder@db:5432/agriprofit
+          POSTGRES_USER=agriprofit
+          POSTGRES_PASSWORD=placeholder
+          POSTGRES_DB=agriprofit
+          CORS_ORIGINS=["https://agriprofit.example.edu"]
+          ENV
+          docker compose -f docker-compose.prod.yml config --quiet
+          echo "Production compose renders without the edge profile."
+
+      - name: The optional TLS edge still renders when it is selected
+        run: |
+          set -e
+          CADDY_DOMAIN=agriprofit.example.edu \
+            docker compose -f docker-compose.prod.yml --profile edge config --quiet
+          echo "Edge profile renders."
+
+      - name: The database publishes no host port in production
+        # Publishing 5432 is how a development convenience becomes an
+        # internet-facing Postgres; the prod file deliberately omits it.
+        run: |
+          set -e
+          if docker compose -f docker-compose.prod.yml config \
+               | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); sys.exit(0 if d['services']['db'].get('ports') else 1)"; then
+            echo "::error::docker-compose.prod.yml publishes a host port for the database."
+            exit 1
+          fi
+          echo "Database is reachable on the compose network only."
+
+      - name: The ops scripts are valid shell
+        run: |
+          set -e
+          sh -n ops/backup.sh
+          sh -n ops/restore.sh
+          echo "ops/backup.sh and ops/restore.sh parse."
