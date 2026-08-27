@@ -1,0 +1,34 @@
+{
+  "_what_this_is": "The yield model's metrics as measured under the environment recorded below. Reproduce with: python -m pytest backend/tests/test_reproducibility.py. See docs/REPRODUCIBILITY.md.",
+  "dataset": {
+    "generator": "backend/app/ml/dataset.generate",
+    "n_samples": 6000,
+    "seed": 42,
+    "sha256": "a461b884afc9fafda953ff90cc2f75eb0d8608f2e58ad9d206fc215d7b6ba5bf",
+    "_fingerprint_basis": "sha256 over the float64 bytes of rainfall, fertilizer_used, soil_ph and yield_t_ha, then the concatenated crop labels. Deliberately NOT a hash of the CSV text: pandas float formatting can change between versions and would break this for a reason unrelated to the data."
+  },
+  "training": {
+    "estimator": "Pipeline(OneHotEncoder + RandomForestRegressor)",
+    "n_estimators": 200,
+    "seed": 42,
+    "test_size": 0.2,
+    "split_random_state": 42
+  },
+  "metrics": {
+    "r2": 0.9762,
+    "mae": 0.2414,
+    "rmse": 0.4883
+  },
+  "environment": {
+    "python": "3.14.5",
+    "scikit-learn": "1.9.0",
+    "numpy": "2.4.6",
+    "pandas": "3.0.3"
+  },
+  "tolerance": {
+    "_note": "Absolute tolerance for a match within the recorded environment.",
+    "r2": 0.0005,
+    "mae": 0.0005,
+    "rmse": 0.0005
+  }
+}
