@@ -54,6 +54,21 @@ export interface Equipment {
   purchase_date?: string | null;
   purchase_price?: number | null;
   depreciation_rate?: number | null;
+  /**
+   * When the asset was corrected; null means "as originally entered".
+   * Shown on the card because a correction moves the depreciation overlay and
+   * therefore both break-even prices — a figure that changed silently is
+   * indistinguishable from one that was always that value.
+   */
+  updated_at?: string | null;
+}
+
+/** A partial correction. Every field optional; omitted means "leave alone". */
+export interface EquipmentUpdate {
+  name?: string;
+  model?: string;
+  purchase_price?: number;
+  depreciation_rate?: number;
 }
 
 export interface MaintenanceLog {

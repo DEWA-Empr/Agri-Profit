@@ -1,8 +1,8 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { Tractor, Plus, Wrench, Calendar, Hash } from 'lucide-react';
+import { Tractor, Plus, Wrench, Calendar, Hash, Pencil } from 'lucide-react';
 import { equipmentService } from '../../lib/apiClient';
 import { purgeApiReadCache } from '../../lib/apiCache';
-import type { Equipment, EquipmentCreate } from '../../types/domain';
+import type { Equipment, EquipmentCreate, EquipmentUpdate } from '../../types/domain';
 import { colors } from '../../styles/theme';
 import { MaintenancePanel } from './components/MaintenancePanel';
 
@@ -19,6 +19,61 @@ const EquipmentPage = () => {
   const emptyForm = { name: '', model: '', purchase_date: '', purchase_price: '', depreciation_rate: '' };
   const [newEq, setNewEq] = useState(emptyForm);
   const [maintenanceFor, setMaintenanceFor] = useState<Equipment | null>(null);
+  // Which asset is being corrected, and the draft values. A mistyped
+  // depreciation rate used to be permanent, and it silently biases the
+  // depreciation overlay, allocated fixed cost and both break-even prices.
+  const [editing, setEditing] = useState<Equipment | null>(null);
+  const [editDraft, setEditDraft] = useState({ purchase_price: '', depreciation_rate: '' });
+  const [editError, setEditError] = useState('');
+
+  const startEdit = (item: Equipment) => {
+    setEditError('');
+    setEditDraft({
+      purchase_price: item.purchase_price != null ? String(item.purchase_price) : '',
+      depreciation_rate: item.depreciation_rate != null ? String(item.depreciation_rate) : '',
+    });
+    setEditing(item);
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    // Only send what the farmer actually changed. The PATCH is partial, so an
+    // omitted field is left alone — sending every field would overwrite values
+    // that were never in question.
+    const changes: EquipmentUpdate = {};
+    const price = editDraft.purchase_price.trim();
+    const rate = editDraft.depreciation_rate.trim();
+
+    if (price !== '' && Number(price) !== editing.purchase_price) {
+      if (!Number.isFinite(Number(price)) || Number(price) < 0) {
+        setEditError('Purchase price must be a number and cannot be negative.');
+        return;
+      }
+      changes.purchase_price = Number(price);
+    }
+    if (rate !== '' && Number(rate) !== editing.depreciation_rate) {
+      const value = Number(rate);
+      // 0 is refused rather than stored: in the overlay it is indistinguishable
+      // from "unrated", and an unrated asset is counted, never charged at zero.
+      if (!Number.isFinite(value) || value <= 0 || value > 100) {
+        setEditError('Depreciation rate must be between 0 and 100 percent per year.');
+        return;
+      }
+      changes.depreciation_rate = value;
+    }
+    if (Object.keys(changes).length === 0) {
+      setEditing(null);
+      return;
+    }
+
+    try {
+      await equipmentService.updateEquipment(editing.id, changes);
+      setEditing(null);
+      fetchEquipment();
+    } catch {
+      setEditError('Could not save the correction. Check the values and try again.');
+    }
+  };
 
   const fetchEquipment = () => {
     equipmentService.getEquipment()
@@ -141,12 +196,49 @@ const EquipmentPage = () => {
                   <Hash size={13} /> Dep. rate {item.depreciation_rate ?? '—'}%/yr
                 </div>
               </div>
-              <button
-                onClick={() => setMaintenanceFor(item)}
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: colors.primary, fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
-              >
-                <Wrench size={14} /> Maintenance
-              </button>
+              {item.updated_at && (
+                <p style={{ fontSize: '10px', color: colors.textMuted }}>
+                  Corrected {new Date(item.updated_at).toLocaleDateString()}
+                </p>
+              )}
+
+              {editing?.id === item.id ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={label}>
+                    Purchase price (₦)
+                    <input style={input} inputMode="decimal" value={editDraft.purchase_price}
+                      onChange={(e) => setEditDraft({ ...editDraft, purchase_price: e.target.value })} />
+                  </label>
+                  <label style={label}>
+                    Depreciation rate (%/yr)
+                    <input style={input} inputMode="decimal" value={editDraft.depreciation_rate}
+                      onChange={(e) => setEditDraft({ ...editDraft, depreciation_rate: e.target.value })} />
+                  </label>
+                  {editError && <p style={{ fontSize: '11px', color: colors.dangerStrong }}>{editError}</p>}
+                  <p style={{ fontSize: '10px', color: colors.textMuted }}>
+                    Changing these moves your break-even prices.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={saveEdit} style={{ flex: 1, padding: '7px', borderRadius: '7px', border: 'none', background: colors.primary, color: colors.surface, fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Save</button>
+                    <button onClick={() => setEditing(null)} style={{ flex: 1, padding: '7px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, background: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '16px' }}>
+                  <button
+                    onClick={() => setMaintenanceFor(item)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: colors.primary, fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                  >
+                    <Wrench size={14} /> Maintenance
+                  </button>
+                  <button
+                    onClick={() => startEdit(item)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: colors.textMuted, fontSize: '12px', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                  >
+                    <Pencil size={14} /> Correct
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 from ..models import models
 from ..schemas import schemas
@@ -28,6 +30,47 @@ def create_equipment(db: Session, farm_id: int, equipment: schemas.EquipmentCrea
     db.commit()
     db.refresh(db_equipment)
     return db_equipment
+
+def update_equipment(
+    db: Session, farm_id: int, equipment_id: int, changes: schemas.EquipmentUpdate
+):
+    """Correct an asset in place. Farm-scoped, partial, and stamped.
+
+    WHY THIS IS NOT A BREACH OF THE PLATFORM'S IMMUTABILITY RULE. The ledger is
+    append-only because a Financial Transaction records something that happened;
+    rewriting one would rewrite history. An Equipment row is not that. It
+    describes a thing the farm owns, and `depreciation_rate` in particular is an
+    estimate the farmer supplies — a parameter, not an event. The overlay it
+    feeds is computed at report time and never posted to the ledger, so
+    correcting it changes no recorded transaction. Before this existed a
+    mistyped rate was permanent and silently biased the overlay, allocated fixed
+    cost and both break-even prices, with no way to put it right.
+
+    `exclude_unset` so an omitted field is left alone. Sending only
+    `depreciation_rate` must not blank the purchase price.
+
+    `updated_at` is stamped ONLY when something actually changed. A PATCH whose
+    every field matches the current value is not a correction, and recording one
+    would tell a reader the asset moved when it did not.
+    """
+    equipment = get_equipment(db, farm_id, equipment_id)
+
+    updates = changes.model_dump(exclude_unset=True)
+    applied = {
+        field: value
+        for field, value in updates.items()
+        if getattr(equipment, field) != value
+    }
+    if not applied:
+        return equipment
+
+    for field, value in applied.items():
+        setattr(equipment, field, value)
+    equipment.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(equipment)
+    return equipment
+
 
 def get_equipment_list(db: Session, farm_id: int, skip: int = 0, limit: int = 100):
     return (

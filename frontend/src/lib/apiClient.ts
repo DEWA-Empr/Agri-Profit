@@ -6,6 +6,7 @@ import type {
   Summary,
   Equipment,
   EquipmentCreate,
+  EquipmentUpdate,
   MaintenanceLog,
   MaintenanceLogCreate,
   PnlReport,
@@ -174,6 +175,10 @@ export const bioprocessService = {
 export const equipmentService = {
   getEquipment: () => api.get<Equipment[]>('/equipment/'),
   createEquipment: (data: EquipmentCreate) => api.post<Equipment>('/equipment/', data),
+  // PARTIAL by design: omitted fields are left as they are, so correcting a
+  // mistyped depreciation rate cannot blank the purchase price beside it.
+  updateEquipment: (id: number, data: EquipmentUpdate) =>
+    api.patch<Equipment>(`/equipment/${id}`, data),
   getMaintenance: (id: number | string) => api.get<MaintenanceLog[]>(`/equipment/${id}/maintenance`),
   createMaintenance: (data: MaintenanceLogCreate) => api.post<MaintenanceLog>('/equipment/maintenance', data),
 };

@@ -367,8 +367,29 @@ class EquipmentBase(BaseModel):
 class EquipmentCreate(EquipmentBase):
     pass
 
+
+class EquipmentUpdate(BaseModel):
+    """A partial correction. Every field is optional and OMITTING one leaves it
+    unchanged — the service dumps with `exclude_unset`, so "not mentioned" and
+    "explicitly cleared to null" stay distinguishable. That distinction is the
+    whole point of a PATCH here: correcting a mistyped depreciation rate must
+    not blank out the purchase price that was never in question.
+
+    The bounds are the same as EquipmentBase's, because a correction can be as
+    wrong as an original entry.
+    """
+    name: Annotated[Optional[str], Field(default=None, min_length=1, max_length=120)] = None
+    model: ShortText = None
+    purchase_date: Optional[datetime] = None
+    purchase_price: OptionalMoney = None
+    depreciation_rate: Annotated[Optional[float], Field(default=None, gt=0, le=100)] = None
+
+
 class Equipment(EquipmentBase):
     id: int
+    # NULL until the asset is corrected. Surfaced so a reader comparing two
+    # break-even reports can see whether the underlying asset moved.
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 # --- P&L Report Schemas ---

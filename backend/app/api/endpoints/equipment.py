@@ -14,6 +14,21 @@ router = APIRouter(prefix="/equipment", tags=["equipment"])
 def create_equipment(equipment: schemas.EquipmentCreate, db: Session = Depends(get_db), current_user: models.User = Depends(require(Permission.EQUIPMENT_MANAGE))):
     return equipment_service.create_equipment(db=db, farm_id=current_user.farm_id, equipment=equipment)
 
+@router.patch("/{equipment_id}", response_model=schemas.Equipment)
+def update_equipment(equipment_id: int, changes: schemas.EquipmentUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(require(Permission.EQUIPMENT_MANAGE))):
+    """Correct an asset. Partial: omitted fields are left unchanged.
+
+    404 for an asset belonging to another farm — the same verdict, and the same
+    non-disclosure, as reading one.
+
+    This is the one correctable record on the platform, and deliberately so: an
+    Equipment row describes a thing the farm owns rather than something that
+    happened, and the depreciation overlay it feeds is computed at report time
+    and never posted to the ledger. Financial records remain append-only and are
+    still corrected only by contra entry."""
+    return equipment_service.update_equipment(db, current_user.farm_id, equipment_id, changes)
+
+
 @router.get("/", response_model=List[schemas.Equipment])
 def read_equipment(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(require(Permission.EQUIPMENT_READ))):
     return equipment_service.get_equipment_list(db=db, farm_id=current_user.farm_id, skip=skip, limit=limit)

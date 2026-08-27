@@ -171,6 +171,12 @@ class Equipment(Base):
     # Nullable: an asset entered without a rate is excluded from the overlay
     # and counted there, never charged at zero.
     depreciation_rate = Column(Float)
+    # Stamped when the asset is corrected; NULL means "as originally entered".
+    # A correction moves the depreciation overlay and therefore both break-even
+    # prices, so the fact that one happened must be visible rather than silent
+    # (migration b9e5f30c74a1). Not `onupdate=`: that would fire on any flush
+    # touching the row, and only a deliberate correction should be recorded.
+    updated_at = Column(DateTime(timezone=True), nullable=True)
 
 class MaintenanceLog(Base):
     __tablename__ = "maintenance_logs"
