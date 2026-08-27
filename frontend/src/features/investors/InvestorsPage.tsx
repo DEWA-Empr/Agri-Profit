@@ -3,6 +3,8 @@ import { Link2, Plus, Copy, Check, Ban, ShieldCheck } from 'lucide-react';
 import { shareService } from '../../lib/apiClient';
 import type { ShareLink, ShareLinkMinted } from '../../types/domain';
 import { colors } from '../../styles/theme';
+import { NoAccess } from '../../components/NoAccess';
+import { isForbidden } from '../../lib/accessError';
 
 // Owner-side management of investor/lender share links: mint a revocable,
 // read-only link and revoke it. The raw token is shown exactly once (at mint) —
@@ -18,14 +20,23 @@ const InvestorsPage = () => {
   const [justMinted, setJustMinted] = useState<ShareLinkMinted | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [denied, setDenied] = useState(false);
+
   const load = () => {
     shareService.listLinks()
       .then((res) => setLinks(res.data))
-      .catch((err) => console.error(err))
+      .catch((err) => {
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      })
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
+
+  if (denied) {
+    return <NoAccess what="investor sharing, which only the farm owner manages" />;
+  }
 
   const handleMint = async () => {
     setMinting(true);

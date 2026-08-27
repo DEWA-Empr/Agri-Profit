@@ -3,6 +3,8 @@ import { Lightbulb } from 'lucide-react';
 import { colors, accents, cardShadow } from '../../../styles/theme';
 import { SectionHeader } from './SectionHeader';
 import { EmptyState } from '../../../components/EmptyState';
+import { NoAccess } from '../../../components/NoAccess';
+import { isForbidden } from '../../../lib/accessError';
 import { dssService } from '../../../lib/apiClient';
 import type { DssDecisionSupport, DssCropMetrics } from '../../../types/domain';
 
@@ -122,15 +124,29 @@ const CropRow = ({ c }: { c: DssCropMetrics }) => {
 export const DecisionSupport = () => {
   const [data, setData] = useState<DssDecisionSupport | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     dssService.getDecisionSupport()
       .then((res) => setData(res.data))
-      .catch((err) => console.error(err))
+      .catch((err) => {
+        // Otherwise a refusal reached the "0 crops from your ledger" empty
+        // state, which asserts something false about the farm's records.
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      })
       .finally(() => setLoaded(true));
   }, []);
 
   const crops = data?.crops ?? [];
+
+  if (denied) {
+    return (
+      <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, boxShadow: cardShadow, padding: '20px' }}>
+        <NoAccess what="per-crop margins and decision support" bare />
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, boxShadow: cardShadow, padding: '20px', display: 'flex', flexDirection: 'column' }}>

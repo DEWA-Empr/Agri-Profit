@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { navSections, visibleSections, type NavSection } from './navigation';
+import {
+  navSections, visibleSections, homePathFor, permissionForPath, type NavSection,
+} from './navigation';
 
 // Nav filtering is presentation, not access control — every one of these routes
 // is independently enforced by the API. What these tests protect is that the
@@ -32,7 +34,10 @@ describe('visibleSections', () => {
 
   it('shows a worker only entry screens', () => {
     const shown = labels(visibleSections(navSections, WORKER));
-    expect(shown).toContain('Dashboard');
+    // The dashboard is NOT among them. Every panel on it reads a finance:read
+    // endpoint, so offering the link to a worker led to a page whose tiles,
+    // charts and decision table all answered 403.
+    expect(shown).not.toContain('Dashboard');
     expect(shown).toContain('Farm Records');
     expect(shown).not.toContain('P&L Report');
     expect(shown).not.toContain('Equipment');
@@ -44,7 +49,8 @@ describe('visibleSections', () => {
     // null = not yet known. Showing everything here would flash links that then
     // 403; showing the unrestricted subset degrades quietly instead.
     const shown = labels(visibleSections(navSections, null));
-    expect(shown).toContain('Dashboard');
+    expect(shown).toContain('Farm Records');
+    expect(shown).not.toContain('Dashboard');
     expect(shown).not.toContain('P&L Report');
   });
 
@@ -70,5 +76,47 @@ describe('visibleSections', () => {
         expect(all.has(label)).toBe(true);
       }
     }
+  });
+});
+
+// The route guard and the nav read the same table, so these two helpers are
+// what stop a link and its route disagreeing about who may pass.
+describe('homePathFor', () => {
+  it('sends an owner and a manager to the dashboard', () => {
+    expect(homePathFor(OWNER)).toBe('/');
+    expect(homePathFor(MANAGER)).toBe('/');
+  });
+
+  it('sends a worker to farm records', () => {
+    // The approved product decision: a worker's practical home is the screen
+    // they actually use, not a dashboard of figures they may not read.
+    expect(homePathFor(WORKER)).toBe('/records');
+  });
+
+  it('sends an unknown caller to farm records rather than guessing', () => {
+    expect(homePathFor(null)).toBe('/records');
+    expect(homePathFor([])).toBe('/records');
+  });
+
+  it('only ever returns a path that needs no permission', () => {
+    // A home that were itself guarded would redirect to itself forever.
+    for (const perms of [OWNER, MANAGER, WORKER, [], null]) {
+      const home = homePathFor(perms);
+      const required = permissionForPath(home);
+      expect(required === undefined || (perms ?? []).includes(required)).toBe(true);
+    }
+  });
+});
+
+describe('permissionForPath', () => {
+  it('reports what each guarded screen needs', () => {
+    expect(permissionForPath('/')).toBe('finance:read');
+    expect(permissionForPath('/reports')).toBe('finance:read');
+    expect(permissionForPath('/equipment')).toBe('equipment:read');
+    expect(permissionForPath('/investors')).toBe('share:manage');
+  });
+
+  it('leaves farm records open to every signed-in role', () => {
+    expect(permissionForPath('/records')).toBeUndefined();
   });
 });

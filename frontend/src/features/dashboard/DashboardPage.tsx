@@ -6,6 +6,8 @@ import { MetricCard } from './components/MetricCard';
 import { colors } from '../../styles/theme';
 import { DecisionSupport } from './components/DecisionSupport';
 import { DashboardOnboarding } from './components/DashboardOnboarding';
+import { NoAccess } from '../../components/NoAccess';
+import { isForbidden } from '../../lib/accessError';
 
 // The two charts are the only recharts consumers in the app (~360 kB of the
 // bundle). Loading them lazily lets the KPI row and decision-support table
@@ -38,15 +40,33 @@ const fmt = (n: number): string => {
 const DashboardPage: FC<{ isOnline: boolean; pendingCount: number }> = () => {
   const [summary, setSummary] = useState<Summary>({ revenue: 0, expenses: 0, gross_margin: 0 });
   const [loaded, setLoaded] = useState(false);
+  // Distinguished from "no data": a refused summary must not fall through to
+  // the zeros below, because zeros here read as a statement about the farm.
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     ledgerService.getSummary()
       .then((res) => setSummary(res.data))
-      .catch((err) => console.error(err))
+      .catch((err) => {
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      })
       .finally(() => setLoaded(true));
   }, []);
 
   const marginPct = summary.revenue > 0 ? (summary.gross_margin / summary.revenue) * 100 : 0;
+
+  // Checked BEFORE the empty-state branch. A refused summary is all-zero, so
+  // without this a worker who reached this page would be shown the first-run
+  // onboarding — told their farm has no records when in fact it has records
+  // they may not see.
+  //
+  // In normal use the route guard redirects such a caller to /records before
+  // this renders. This is the answer for the case the guard cannot cover: a
+  // role changed in another tab, or finance access withdrawn mid-session.
+  if (denied) {
+    return <NoAccess what="the farm's financial summary" />;
+  }
 
   // First run: nothing in the ledger yet. Show onboarding rather than a wall of
   // zeros and illustrative cards. Wait until the summary has loaded so we don't

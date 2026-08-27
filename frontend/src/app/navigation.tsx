@@ -62,7 +62,12 @@ export const navSections: NavSection[] = [
   {
     heading: 'OVERVIEW',
     items: [
-      { label: 'Dashboard', to: '/', icon: <LayoutDashboard size={14} /> },
+      // The dashboard is a FINANCE screen: every tile, both charts and the
+      // decision-support table read endpoints gated by finance:read. Before it
+      // carried this permission a worker was shown the link, and following it
+      // produced a page whose every panel 403'd — which is why WORKER_HOME
+      // below exists.
+      { label: 'Dashboard', to: '/', icon: <LayoutDashboard size={14} />, permission: 'finance:read' },
       { label: 'Farm Records', to: '/records', icon: <ClipboardList size={14} /> },
       { label: 'P&L Report', to: '/reports', icon: <FileText size={14} />, permission: 'finance:read' },
     ],
@@ -76,3 +81,42 @@ export const navSections: NavSection[] = [
     ],
   },
 ];
+
+
+// --- Routing derived from the table above ---------------------------------
+// The route guard reads these rather than carrying its own copy of which screen
+// needs what. One table, so a link and its route can never disagree about the
+// permission — the failure that would otherwise show a link the guard then
+// bounces, or guard a screen the nav still offers.
+
+/** Every signed-in role may reach this, and it is the fallback destination. */
+const UNIVERSAL_HOME = '/records';
+
+/** Where a caller with `permissions` should land, and where an unauthorized
+ *  navigation is sent back to.
+ *
+ *  A null list (identity not yet known) yields the universal home rather than a
+ *  guess. Callers that can afford to wait should check for `loading` first and
+ *  not redirect at all; this is the answer for the ones that cannot.
+ *
+ *  The result is ALWAYS an unguarded path, which is what stops a redirect loop:
+ *  sending someone to a screen they also may not see would bounce forever.
+ */
+export function homePathFor(permissions: string[] | null): string {
+  const held = new Set(permissions ?? []);
+  const dashboard = navSections
+    .flatMap((s) => s.items)
+    .find((i) => i.to === '/');
+  if (dashboard && (!dashboard.permission || held.has(dashboard.permission))) {
+    return '/';
+  }
+  return UNIVERSAL_HOME;
+}
+
+/** The permission a path needs, or undefined if every signed-in role may see
+ *  it. Unknown paths are unrestricted: the route table owns what exists, and a
+ *  path absent from the nav (there are none today) should not become
+ *  unreachable by silently defaulting to "denied". */
+export function permissionForPath(path: string): string | undefined {
+  return navSections.flatMap((s) => s.items).find((i) => i.to === path)?.permission;
+}

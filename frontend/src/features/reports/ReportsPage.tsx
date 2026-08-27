@@ -4,17 +4,30 @@ import { reportsService } from '../../lib/apiClient';
 import type { PnlReport } from '../../types/domain';
 import { downloadPnlCsv } from './downloadPnlCsv';
 import { colors } from '../../styles/theme';
+import { NoAccess } from '../../components/NoAccess';
+import { isForbidden } from '../../lib/accessError';
 
 const ReportsPage = () => {
   const [report, setReport] = useState<PnlReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     reportsService.getPnl()
       .then((res) => setReport(res.data))
-      .catch((err) => console.error(err))
+      .catch((err) => {
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  // The route guard sends a caller without finance:read to /records before this
+  // mounts. This covers what the guard cannot: access withdrawn mid-session, or
+  // a role changed in another tab.
+  if (denied) {
+    return <NoAccess what="the farm's profit and loss report" />;
+  }
 
   const th: CSSProperties = { textAlign: 'left', fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em', color: colors.textMuted, textTransform: 'uppercase', padding: '10px 12px', borderBottom: `0.5px solid ${colors.border}` };
   const thRight: CSSProperties = { ...th, textAlign: 'right' };

@@ -4,6 +4,7 @@ import { usePendingSync } from './hooks/usePendingSync';
 import { useRecordCount } from './hooks/useRecordCount';
 import { AppShell } from './app/layout/AppShell';
 import { AuthProvider } from './features/auth/AuthProvider';
+import { IdentityProvider } from './features/auth/IdentityProvider';
 import { useAuth } from './features/auth/useAuth';
 import { Login } from './features/auth/Login';
 import PublicInvestorReport from './features/investors/PublicInvestorReport';
@@ -15,13 +16,19 @@ const AuthenticatedApp = () => {
   const pendingCount = usePendingSync();
   const { count: recordCount, refresh: refreshRecordCount } = useRecordCount();
 
+  // IdentityProvider sits INSIDE the authenticated tree so GET /auth/me is only
+  // ever requested with a token, and so the answer is discarded on logout: the
+  // whole subtree unmounts when the token goes, which is what stops the next
+  // account on a shared device inheriting the previous one's permissions.
   return (
-    <AppShell
-      isOnline={isOnline}
-      pendingCount={pendingCount}
-      recordCount={recordCount}
-      onRecordChange={refreshRecordCount}
-    />
+    <IdentityProvider>
+      <AppShell
+        isOnline={isOnline}
+        pendingCount={pendingCount}
+        recordCount={recordCount}
+        onRecordChange={refreshRecordCount}
+      />
+    </IdentityProvider>
   );
 };
 

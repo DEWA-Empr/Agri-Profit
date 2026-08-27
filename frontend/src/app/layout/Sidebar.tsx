@@ -1,10 +1,19 @@
-import { useEffect, useState, type FC } from 'react';
+import { type FC } from 'react';
 import { Leaf } from 'lucide-react';
 import { NavItem } from './NavItem';
 import { SyncStatus } from './SyncStatus';
 import { navSections, visibleSections } from '../navigation';
-import { authService } from '../../lib/apiClient';
+import { useIdentity, permissionsOf } from '../../features/auth/useIdentity';
 import { colors } from '../../styles/theme';
+
+// How a stored role is written in the profile footer. Anything unrecognised
+// falls back to the raw value rather than to a flattering default — a role this
+// build does not know about must not be displayed as "Farm Owner".
+const ROLE_LABELS: Record<string, string> = {
+  owner: 'Farm Owner',
+  manager: 'Farm Manager',
+  worker: 'Farm Worker',
+};
 
 // Left navigation rail: brand, nav (rendered from navSections), sync status,
 // and the user profile footer.
@@ -19,23 +28,18 @@ export const Sidebar: FC<{
   /** Called when a nav link is activated, so the mobile drawer can close. */
   onNavigate?: () => void;
 }> = ({ isOnline, pendingCount, recordCount, onNavigate }) => {
-  const [email, setEmail] = useState<string | null>(null);
-  // Null until the identity call answers. `visibleSections` treats null as "no
-  // permissions yet" and shows only the unrestricted links, so the nav never
-  // briefly offers a screen the caller cannot open.
-  const [permissions, setPermissions] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    authService.me()
-      .then((res) => {
-        setEmail(res.data.email);
-        setPermissions(res.data.permissions ?? []);
-      })
-      .catch(() => {
-        setEmail(null);
-        setPermissions(null);
-      });
-  }, []);
+  // Identity comes from the shared provider rather than a fetch of its own: the
+  // router needs the same answer to decide where a role may go, and two fetches
+  // would mean two moments at which the app disagrees with itself about the
+  // same user.
+  //
+  // `permissionsOf` yields null until the call answers, and `visibleSections`
+  // treats null as "no permissions yet" and shows only the unrestricted links —
+  // so the nav never briefly offers a screen the caller cannot open.
+  const identity = useIdentity();
+  const permissions = permissionsOf(identity);
+  const user = identity.status === 'ready' ? identity.user : null;
+  const email = user?.email ?? null;
 
   const sections = visibleSections(navSections, permissions);
 
@@ -74,10 +78,12 @@ export const Sidebar: FC<{
 
     <SyncStatus isOnline={isOnline} pendingCount={pendingCount} />
 
-    {/* Profile — the signed-in user's real email from GET /auth/me. "Farm Owner"
-        is accurate rather than decorative: registration is the only path that
-        creates a user and it mints that user a farm of their own
-        (auth_service.register), so there is no non-owner member today. */}
+    {/* Profile — the signed-in user's real email and REAL ROLE from GET /auth/me.
+        This line used to read "Farm Owner" for everyone, which was true only
+        while registration was the sole way an account came into existence. It
+        is not any more: an owner can add workers and managers
+        (POST /auth/members), so the label is read from the account rather than
+        assumed. */}
     <div style={{ padding: '18px', borderTop: '0.5px solid rgba(99, 153, 34, 0.12)', display: 'flex', alignItems: 'center', gap: '12px' }}>
       <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: colors.primaryDarkest, border: `1.5px solid ${colors.primaryDark}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: colors.primaryLight, fontWeight: '800', fontSize: '11px', flexShrink: 0, textTransform: 'uppercase' }}>
         {email ? email[0] : '·'}
@@ -86,7 +92,9 @@ export const Sidebar: FC<{
         <p style={{ color: colors.primaryLight, fontSize: '12px', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={email ?? undefined}>
           {email ?? '—'}
         </p>
-        <p style={{ color: colors.primaryDark, fontSize: '10px' }}>Farm Owner</p>
+        <p style={{ color: colors.primaryDark, fontSize: '10px' }}>
+          {user ? (ROLE_LABELS[user.role] ?? user.role) : '—'}
+        </p>
       </div>
     </div>
   </aside>

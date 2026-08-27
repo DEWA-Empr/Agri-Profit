@@ -5,6 +5,8 @@ import { purgeApiReadCache } from '../../lib/apiCache';
 import type { Equipment, EquipmentCreate, EquipmentUpdate } from '../../types/domain';
 import { colors } from '../../styles/theme';
 import { MaintenancePanel } from './components/MaintenancePanel';
+import { NoAccess } from '../../components/NoAccess';
+import { isForbidden } from '../../lib/accessError';
 
 // Salvaged from the original pages/Equipment.tsx (logic preserved, restyled to
 // the app's inline-style standard since Tailwind is not compiled).
@@ -25,6 +27,7 @@ const EquipmentPage = () => {
   const [editing, setEditing] = useState<Equipment | null>(null);
   const [editDraft, setEditDraft] = useState({ purchase_price: '', depreciation_rate: '' });
   const [editError, setEditError] = useState('');
+  const [denied, setDenied] = useState(false);
 
   const startEdit = (item: Equipment) => {
     setEditError('');
@@ -78,7 +81,10 @@ const EquipmentPage = () => {
   const fetchEquipment = () => {
     equipmentService.getEquipment()
       .then((res) => setEquipment(res.data))
-      .catch((err) => console.error('Error fetching equipment:', err))
+      .catch((err) => {
+        if (isForbidden(err)) setDenied(true);
+        else console.error('Error fetching equipment:', err);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -114,6 +120,13 @@ const EquipmentPage = () => {
 
   const input: CSSProperties = { width: '100%', padding: '7px 10px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '12px', marginTop: '4px' };
   const label: CSSProperties = { fontSize: '11px', fontWeight: 600, color: colors.labelText };
+
+
+  // Reached only if equipment:read is withdrawn mid-session; the route guard
+  // redirects a role without it before this page mounts.
+  if (denied) {
+    return <NoAccess what="the farm's equipment register" />;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>

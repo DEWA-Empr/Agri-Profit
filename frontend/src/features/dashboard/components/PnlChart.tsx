@@ -6,6 +6,8 @@ import { reportsService } from '../../../lib/apiClient';
 import type { MonthlyPnlPoint } from '../../../types/domain';
 import { colors, cardShadow } from '../../../styles/theme';
 import { SectionHeader } from './SectionHeader';
+import { NoAccess } from '../../../components/NoAccess';
+import { isForbidden } from '../../../lib/accessError';
 
 const naira = (n: number) => `₦${Number(n).toLocaleString()}`;
 
@@ -16,14 +18,28 @@ interface Point { month: string; net: number; }
 // reviewed standalone "Net profit trend" pattern (replaces the earlier bars).
 export const PnlChart = () => {
   const [data, setData] = useState<Point[]>([]);
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     reportsService.getMonthlyPnl()
       .then((res) => setData(res.data.map((p: MonthlyPnlPoint) => ({ month: p.month, net: p.revenue - p.expenses }))))
-      .catch((err) => console.error(err));
+      .catch((err) => {
+        // Without this the chart drew a flat empty trend, which looks like a
+        // farm that earned nothing rather than a screen this role may not read.
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      });
   }, []);
 
   const peak = data.reduce<Point | null>((best, p) => (!best || p.net > best.net ? p : best), null);
+
+  if (denied) {
+    return (
+      <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, boxShadow: cardShadow, padding: '20px' }}>
+        <NoAccess what="the farm's profit trend" bare />
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, boxShadow: cardShadow, padding: '20px' }}>
