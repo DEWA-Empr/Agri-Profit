@@ -1,0 +1,137 @@
+# Production composition for a departmental deployment.
+#
+# HOW THIS DIFFERS FROM docker-compose.yml, which stays exactly as it is because
+# it is the development stack and one of its services (frontend-prod) is the
+# container the Chapter 4 performance figures were measured against:
+#
+#   * every secret comes from the environment with NO default, so a missing one
+#     stops the deployment instead of silently using a public value;
+#   * Postgres publishes no host port — the database is reachable only on the
+#     compose network, from the backend;
+#   * health checks and restart policies exist, so a crashed container comes
+#     back and an unready one is visible;
+#   * the frontend is served by nginx from a static build rather than by
+#     `vite preview`, which is a development preview server and says so;
+#   * TLS terminates in front (see the `edge` profile, or your institution's
+#     existing reverse proxy).
+#
+# Usage:
+#   cp .env.example .env      # then fill it in — SECRET_KEY and the DB password
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# The ${VAR:?message} form is what makes a missing secret fail loudly at
+# `compose up` rather than at the first request.
+
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data/
+      # Where ops/backup.sh writes. Mounted so a dump survives the container and
+      # can be copied off the host by whatever the institution already uses.
+      - ./backups:/backups
+    # NO published port. The database is reachable on the compose network only;
+    # publishing 5432 to the host is how a development convenience becomes an
+    # internet-facing Postgres.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      # No default. core/config.py refuses to boot on the public development key
+      # outside dev/test, and this makes the failure happen one step earlier.
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS in .env}
+      # Only meaningful because a proxy sits in front and overwrites the header.
+      # With no proxy this must stay false or every per-IP rate limit can be
+      # bypassed by sending the header yourself.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
+      SHARE_LINK_DEFAULT_TTL_DAYS: ${SHARE_LINK_DEFAULT_TTL_DAYS:-90}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+    # The image's CMD applies migrations before starting uvicorn, so a deploy
+    # brings the schema forward on its own. See backend/Dockerfile.
+    healthcheck:
+      # Readiness, not liveness: this one reports the database too, which is
+      # what `depends_on: service_healthy` downstream should actually wait for.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready', timeout=4).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s      # generous: first boot trains the yield model
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.serve
+      args:
+        # Baked in at build time — Vite inlines it into the bundle, so changing
+        # it means rebuilding the image, not restarting the container.
+        # The app reads VITE_API_URL (frontend/src/lib/apiClient.ts).
+        # Default is same-origin: Caddy proxies /api/* to the backend, so the
+        # browser sends no CORS preflight and the service worker caches API
+        # reads without an opaque-response problem.
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    ports:
+      # Bound to localhost, because TLS terminates in front of this. Exposing
+      # 8080 to the world would serve the PWA over plain HTTP, and a service
+      # worker will not install on an insecure origin anyway.
+      - "127.0.0.1:8080:8080"
+
+  # Optional TLS edge, for a deployment with no institutional reverse proxy in
+  # front. Caddy obtains and renews a certificate automatically, which is the
+  # smallest correct HTTPS story available — one image and three lines of
+  # config, rather than a certbot cron nobody remembers to check.
+  #
+  #   CADDY_DOMAIN=agriprofit.example.edu \
+  #     docker compose -f docker-compose.prod.yml --profile edge up -d
+  #
+  # If your department already terminates TLS (most do), skip this profile
+  # entirely and point the existing proxy at 127.0.0.1:8080.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: [edge]
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?set CADDY_DOMAIN to the public hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # certificates — losing this re-issues them
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  postgres_data_prod:
+  caddy_data:
+  caddy_config:

@@ -4,7 +4,10 @@ from contextlib import asynccontextmanager
 
 import math
 
-from fastapi import FastAPI, Request
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -13,6 +16,7 @@ from .api.router import api_router
 from .core.config import settings
 from .core.exceptions import AppError
 from .core.logging_safety import safe_request_line
+from .models.database import get_db
 
 # Schema is managed by Alembic migrations (applied on container startup).
 # Tests create the schema directly via Base.metadata.create_all (see conftest.py).
@@ -144,4 +148,40 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    """LIVENESS. Is this process up and serving?
+
+    Deliberately touches nothing else. A liveness probe that checked the
+    database would restart a perfectly healthy application every time Postgres
+    hiccupped, turning a brief outage into a restart loop that makes recovery
+    slower. "Should I be killed and replaced" and "can I serve traffic right
+    now" are different questions; the second one is /health/ready.
+    """
     return {"status": "healthy"}
+
+
+@app.get("/health/ready")
+async def readiness_check(response: Response, db: Session = Depends(get_db)):
+    """READINESS. Can this instance actually serve a request?
+
+    Answers 200 when the database responds and 503 when it does not, so a proxy
+    or an operator can tell "the API is down" from "the API is up and its
+    database is not" — which are different problems with different fixes.
+
+    The check is `SELECT 1`: enough to prove the connection pool can reach the
+    server and get an answer, cheap enough to run on a probe interval. The error
+    is logged in full and NOT returned; a connection string in a probe response
+    is a credential in a place nobody is watching.
+    """
+    checks = {"database": "ok"}
+    try:
+        # Through the SAME dependency every request uses, not a separate engine
+        # handle. A probe that reached the database by its own route could report
+        # ready while the path requests actually take was broken.
+        db.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Readiness check failed: database unreachable")
+        checks["database"] = "unreachable"
+        response.status_code = 503
+        return {"status": "not ready", "checks": checks}
+
+    return {"status": "ready", "checks": checks}

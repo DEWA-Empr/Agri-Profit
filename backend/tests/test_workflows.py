@@ -406,3 +406,58 @@ def test_a_brand_new_farm_answers_every_screen_without_inventing_figures(client)
     # Farm-wide coverage is null, not 100 and not 0: there is no cost to have
     # classified, and a percentage over nothing is not a fact.
     assert client.get("/api/v1/dss/cost-structure").json()["farm"]["classification_coverage_pct"] is None
+
+
+# --- Workflow 10: operational health -------------------------------------
+
+def test_liveness_answers_without_touching_the_database(anon_client):
+    """A liveness probe that checked the database would restart a healthy
+    application on every Postgres hiccup, turning a brief outage into a restart
+    loop. It must answer on the process alone."""
+    resp = anon_client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "healthy"}
+
+
+def test_readiness_reports_the_database(anon_client):
+    resp = anon_client.get("/health/ready")
+    assert resp.status_code == 200
+    assert resp.json()["checks"]["database"] == "ok"
+
+
+def _break_the_database(db, message):
+    """Make the session's execute() fail the way an unreachable server would."""
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError(message)
+    db.execute = _raise
+
+
+def test_readiness_fails_loudly_when_the_database_is_unreachable(anon_client, db):
+    """503, not 200 and not a 500 traceback — a proxy has to be able to tell
+    'the API is down' from 'the API is up and its database is not'."""
+    _break_the_database(db, "connection refused")
+    resp = anon_client.get("/health/ready")
+
+    assert resp.status_code == 503
+    assert resp.json()["status"] == "not ready"
+    assert resp.json()["checks"]["database"] == "unreachable"
+
+
+def test_readiness_does_not_leak_the_connection_string(anon_client, db):
+    """A probe response is read by things nobody is watching. The cause is
+    logged in full; it is not returned."""
+    _break_the_database(
+        db, "could not connect to postgresql://user:hunter2@db:5432/agriprofit")
+    body = anon_client.get("/health/ready").text
+
+    assert "hunter2" not in body
+    assert "postgresql://" not in body
+
+
+def test_health_needs_no_authentication(anon_client):
+    """A probe cannot hold a credential. Both endpoints must answer anonymously,
+    and neither may disclose anything about a farm."""
+    for path in ("/health", "/health/ready"):
+        resp = anon_client.get(path)
+        assert resp.status_code in (200, 503)
+        assert "farm" not in resp.text.lower()
