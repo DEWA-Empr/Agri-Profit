@@ -361,6 +361,16 @@ class MaintenanceLog(MaintenanceLogBase):
 # --- Investor share-link Schemas (ticket 05) ---
 class ShareLinkCreate(BaseModel):
     label: Optional[str] = None
+    # How long the new link should work for. Omitted means the configured
+    # default (Settings.share_link_default_ttl_days). There is deliberately no
+    # way to mint a link that never expires: a bearer credential to a farm's
+    # finances should not outlive the reason it was shared, and a farmer who
+    # needs continued access can mint a fresh link. The ceiling of a year is the
+    # longest window that still reads as a decision rather than a default.
+    expires_in_days: Optional[int] = Field(
+        default=None, ge=1, le=365,
+        description="Link lifetime in days (1-365). Omit for the server default.",
+    )
 
 class ShareLink(BaseModel):
     """Owner-facing metadata for a share link. Never carries the token — only
@@ -368,6 +378,10 @@ class ShareLink(BaseModel):
     id: int
     label: Optional[str] = None
     revoked: bool
+    # NULL only for links minted before expiry existed; those never expire.
+    # Surfaced so an owner can see when a link stops working without having to
+    # test it against a bank.
+    expires_at: Optional[datetime] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

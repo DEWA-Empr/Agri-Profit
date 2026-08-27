@@ -57,6 +57,13 @@ class ShareToken(Base):
     token_hash = Column(String, unique=True, nullable=False, index=True)
     label = Column(String, nullable=True)  # optional note, e.g. "First Bank"
     revoked = Column(Boolean, nullable=False, default=False)
+    # When the capability stops working on its own. NULL means "never" and is
+    # reserved for tokens minted before expiry existed (migration f7b3c2d94e15) —
+    # the service gives every NEW token a real expiry, so an unrevoked link
+    # cannot outlive the assessment it was shared for. Read only by
+    # share_service.get_report_by_token, which treats expired exactly as it
+    # treats revoked: a 404, with no hint that the token was ever valid.
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     farm = relationship("Farm")

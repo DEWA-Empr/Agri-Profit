@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from .api.router import api_router
 from .core.config import settings
 from .core.exceptions import AppError
+from .core.logging_safety import safe_request_line
 
 # Schema is managed by Alembic migrations (applied on container startup).
 # Tests create the schema directly via Base.metadata.create_all (see conftest.py).
@@ -41,11 +42,22 @@ app = FastAPI(title="AgriProfit API", version="0.1.0", lifespan=lifespan)
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log every request with its status code and duration."""
+    """Log every request with its status code and duration.
+
+    The request line goes through `safe_request_line`, which replaces a
+    credential carried in the path — the investor report's share token is one —
+    with a short non-reversible fingerprint. Logging `request.url.path` raw
+    wrote working share links into the log on every investor view.
+    """
     start = time.perf_counter()
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
-    logger.info("%s %s -> %s (%.1fms)", request.method, request.url.path, response.status_code, duration_ms)
+    logger.info(
+        "%s -> %s (%.1fms)",
+        safe_request_line(request.method, request.url.path, request.url.query),
+        response.status_code,
+        duration_ms,
+    )
     return response
 
 # Set up CORS — origins are configured per environment (see core/config.py).
@@ -66,8 +78,16 @@ async def handle_app_error(request: Request, exc: AppError):
 
 @app.exception_handler(Exception)
 async def handle_unexpected_error(request: Request, exc: Exception):
-    """Last-resort handler: log the traceback, return a generic 500 (no leak)."""
-    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    """Last-resort handler: log the traceback, return a generic 500 (no leak).
+
+    The request line is scrubbed for the same reason as in the middleware: an
+    unhandled error on the investor route must not be the one place a share
+    token still reaches the log.
+    """
+    logger.exception(
+        "Unhandled error on %s",
+        safe_request_line(request.method, request.url.path, request.url.query),
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
