@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     # migration f7b3c2d94e15.
     share_link_default_ttl_days: int = 90
 
+    # --- Model training --------------------------------------------------
+    # Whether POST /dss/train may retrain the yield model over the API. OFF.
+    # There is one model artefact and every farm's forecast is served from it,
+    # so retraining is a cross-tenant side effect on shared state. The supported
+    # path is out-of-band: `python -m backend.app.ml.train`, or a restart, which
+    # trains on boot when no artefact is present. Even with this on, the route
+    # additionally needs Permission.MODEL_TRAIN, which no role grants.
+    allow_api_model_training: bool = False
+
     # --- Rate limiting ---------------------------------------------------
     # In-process fixed-window counters (core/rate_limit.py). Sized for a
     # single-container departmental deployment; see that module on why a

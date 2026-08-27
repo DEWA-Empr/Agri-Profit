@@ -20,7 +20,8 @@ from ...models import models
 from ...models.database import get_db
 from ...schemas import schemas
 from ...services import bioprocess_service
-from ..deps import get_current_user
+from ...core.roles import Permission
+from ..deps import require
 
 router = APIRouter(prefix="/bioprocess", tags=["bioprocess"])
 
@@ -47,7 +48,7 @@ def _params_and_metrics(log: models.OperationalLog):
 def get_bioprocess_summary(
     crop: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.LOG_READ)),
 ):
     """Per-crop drying aggregates for the authenticated farm. Excludes reversal
     logs and reversed logs. Optional `crop` filter."""
@@ -134,7 +135,7 @@ def get_bioprocess_summary(
 def get_drying_run(
     log_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.LOG_READ)),
 ):
     """Return one drying run's stored parameters plus every derived metric.
 

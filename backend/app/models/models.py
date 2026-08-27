@@ -30,6 +30,17 @@ class User(Base):
     # bcrypt hash via passlib — the plaintext password is never stored.
     hashed_password = Column(String, nullable=False)
     farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False)
+    # What this account may do within its farm — one of core.roles.Role. A
+    # string rather than a database enum so adding a role later is a code change
+    # rather than a type rewrite. NOT NULL with a default of "owner": every
+    # account that predates authorization was the sole user of its own farm, so
+    # owner is what each already was (migration a8d4e1c60b27).
+    role = Column(String, nullable=False, default="owner", server_default="owner")
+    # Access is withdrawn by clearing this, never by deleting the row — the
+    # records the user entered must keep their author, and the ledger does not
+    # delete. Checked in api/deps.get_current_user, so a deactivated account's
+    # existing token stops working on its next request rather than at expiry.
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     farm = relationship("Farm", back_populates="users")

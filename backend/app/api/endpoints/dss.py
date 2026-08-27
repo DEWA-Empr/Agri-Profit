@@ -3,22 +3,24 @@ import os
 
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import Field
 from sqlalchemy.orm import Session
 
 from ...ml import predict, train
 from ...models import models
+from ...core.config import settings
 from ...models.database import get_db
 from ...schemas import schemas
 from ...services import dss_service, enterprise_service
-from ..deps import get_current_user
+from ...core.roles import Permission
+from ..deps import require
 
 router = APIRouter(prefix="/dss", tags=["dss"])
 
 
 @router.get("/decision-support", response_model=schemas.DSSDecisionSupport)
-def get_decision_support(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def get_decision_support(db: Session = Depends(get_db), current_user: models.User = Depends(require(Permission.FINANCE_READ))):
     """Tier 1 deterministic decision support: per-crop unit cost of production
     and gross margin computed directly from the real ledger (no model). Scoped
     to the authenticated user's farm. Returns empty `crops` when the ledger is
@@ -30,7 +32,7 @@ def get_decision_support(db: Session = Depends(get_db), current_user: models.Use
 # not on any farm's private records — so they require auth but are not
 # farm-scoped.
 @router.post("/predict", response_model=schemas.DSSPredictResponse)
-def get_prediction(payload: schemas.DSSPredictRequest, current_user: models.User = Depends(get_current_user)):
+def get_prediction(payload: schemas.DSSPredictRequest, current_user: models.User = Depends(require(Permission.FORECAST_USE))):
     """Predict crop yield (t/ha) from agronomic inputs.
 
     Inputs are validated against the model's training bounds (422 on failure);
@@ -40,15 +42,35 @@ def get_prediction(payload: schemas.DSSPredictRequest, current_user: models.User
 
 
 @router.post("/train")
-def trigger_training(current_user: models.User = Depends(get_current_user)):
-    """(Re)train the yield model on the agronomic dataset and refresh the cache."""
+def trigger_training(current_user: models.User = Depends(require(Permission.MODEL_TRAIN))):
+    """(Re)train the yield model on the agronomic dataset and refresh the cache.
+
+    OPERATOR-ONLY, AND OFF BY DEFAULT. There is exactly one model artefact and
+    every farm's forecast is served from it, so retraining is a cross-tenant
+    side effect: one tenant calling this changes the numbers every other tenant
+    sees, and does so on a machine shared with their request traffic. Before
+    authorization existed this was reachable by any authenticated user.
+
+    `Permission.MODEL_TRAIN` is granted to no role, so this route is closed
+    unless an operator both grants it and sets ALLOW_API_MODEL_TRAINING. The
+    supported way to retrain is out-of-band — `python -m backend.app.ml.train`,
+    or a container restart, which trains on boot when no artefact is present.
+    """
+    if not settings.allow_api_model_training:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Model retraining over the API is disabled. Retrain out-of-band "
+                "(python -m backend.app.ml.train) — see docs/OPERATIONS.md."
+            ),
+        )
     result = train.train_model()
     predict.reset_cache()  # so the next /predict serves the freshly trained model
     return result
 
 
 @router.get("/model")
-def model_info(current_user: models.User = Depends(get_current_user)):
+def model_info(current_user: models.User = Depends(require(Permission.FORECAST_READ))):
     """Return metadata (metrics, feature importances, train time) for the model."""
     if not os.path.exists(train.META_PATH):
         return {"trained": False}
@@ -68,7 +90,7 @@ def model_info(current_user: models.User = Depends(get_current_user)):
 def get_cost_structure(
     crop: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.FINANCE_READ)),
 ):
     """Cost split by behaviour — variable, semi-variable, recorded fixed and
     unclassified — per crop and farm-wide, with classification coverage.
@@ -93,7 +115,7 @@ def get_break_even_price(
     crop: Optional[str] = None,
     period_days: Optional[float] = Query(default=None, gt=0, le=MAX_PERIOD_DAYS),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.FINANCE_READ)),
 ):
     """Both conditional break-even prices per marketable kilogram, the four cost
     lines behind them, classification coverage, and the count of equipment
@@ -125,7 +147,7 @@ def get_sensitivity(
     percentages: Optional[List[Annotated[int, Field(gt=0, le=1000)]]] = Query(default=None),
     period_days: Optional[float] = Query(default=None, gt=0, le=MAX_PERIOD_DAYS),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.FINANCE_READ)),
 ):
     """Both break-even prices recomputed across a range of yield outcomes.
 
@@ -146,7 +168,7 @@ def get_sensitivity(
 @router.post("/partial-budget", response_model=schemas.PartialBudgetResponse)
 def post_partial_budget(
     payload: schemas.PartialBudgetRequest,
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.FINANCE_READ)),
 ):
     """Appraise one proposed change: (added revenue + reduced cost) − (lost
     revenue + added cost).
@@ -161,7 +183,7 @@ def post_partial_budget(
 def get_yield_baseline(
     crop: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.FINANCE_READ)),
 ):
     """Olympic and grand average yield per crop, or nulls with a stated reason.
 

@@ -2,7 +2,7 @@ import { useEffect, useState, type FC } from 'react';
 import { Leaf } from 'lucide-react';
 import { NavItem } from './NavItem';
 import { SyncStatus } from './SyncStatus';
-import { navSections } from '../navigation';
+import { navSections, visibleSections } from '../navigation';
 import { authService } from '../../lib/apiClient';
 import { colors } from '../../styles/theme';
 
@@ -20,12 +20,24 @@ export const Sidebar: FC<{
   onNavigate?: () => void;
 }> = ({ isOnline, pendingCount, recordCount, onNavigate }) => {
   const [email, setEmail] = useState<string | null>(null);
+  // Null until the identity call answers. `visibleSections` treats null as "no
+  // permissions yet" and shows only the unrestricted links, so the nav never
+  // briefly offers a screen the caller cannot open.
+  const [permissions, setPermissions] = useState<string[] | null>(null);
 
   useEffect(() => {
     authService.me()
-      .then((res) => setEmail(res.data.email))
-      .catch(() => setEmail(null));
+      .then((res) => {
+        setEmail(res.data.email);
+        setPermissions(res.data.permissions ?? []);
+      })
+      .catch(() => {
+        setEmail(null);
+        setPermissions(null);
+      });
   }, []);
+
+  const sections = visibleSections(navSections, permissions);
 
   return (
   <aside style={{ width: '220px', maxWidth: '100%', height: '100%', backgroundColor: colors.sidebarBg, display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '0.5px solid rgba(99, 153, 34, 0.15)' }}>
@@ -45,7 +57,7 @@ export const Sidebar: FC<{
 
     {/* Nav */}
     <nav style={{ flex: 1, marginTop: '10px', overflowY: 'auto' }} className="scroll-container">
-      {navSections.map((section) => (
+      {sections.map((section) => (
         <div key={section.heading}>
           <p style={{ fontSize: '9px', color: colors.sidebarHeading, fontWeight: '800', letterSpacing: '0.1em', padding: '14px 18px 5px' }}>{section.heading}</p>
           {section.items.map((item) => {

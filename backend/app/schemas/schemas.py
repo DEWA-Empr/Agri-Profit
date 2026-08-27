@@ -3,6 +3,14 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Any, Dict, List, Literal
 from ..core.enums import Category, TransactionType
+from ..core.roles import Role
+
+# The role vocabulary at the API edge IS core.roles.Role — not a copy of its
+# values. A Literal listing them here would be a second place to update, and the
+# two would drift the first time a role is added. Pydantic validates an incoming
+# string against the enum, so an unknown role is a 422 at the edge and never
+# reaches the database.
+RoleName = Role
 
 # --- Auth Schemas ---
 class RegisterRequest(BaseModel):
@@ -27,6 +35,51 @@ class UserOut(BaseModel):
     id: int
     email: str
     farm_id: int
+    # The caller's own role, so the interface can hide controls the server would
+    # refuse anyway. HIDING IS NOT ENFORCEMENT — every one of those operations is
+    # independently rejected server-side (api/deps.require); this field exists so
+    # a worker is not shown a button that 403s.
+    role: str = "owner"
+    is_active: bool = True
+    # What this role may do, as the SERVER's own table says — not a list the
+    # client assembles. The interface hides controls whose permission is absent
+    # here, so there is one policy in one place (core/roles.ROLE_PERMISSIONS) and
+    # no client-side copy to drift out of step with it.
+    #
+    # HIDING IS NOT ENFORCEMENT. Every operation is independently rejected in
+    # api/deps.require; this list exists only so a worker is not shown a button
+    # that would 403.
+    permissions: List[str] = []
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Farm membership (authorization, Phase 2) ---------------------------
+class MemberCreate(BaseModel):
+    """Add a user to the caller's own farm. Owner-only.
+
+    There is no farm_id: a member is always created in the caller's farm, so a
+    request cannot name someone else's tenant. The scope is not a parameter, and
+    therefore cannot be tampered with.
+    """
+    email: EmailStr
+    password: str = Field(..., min_length=8, description="At least 8 characters")
+    role: RoleName
+
+
+class MemberRoleUpdate(BaseModel):
+    role: RoleName
+
+
+class MemberActiveUpdate(BaseModel):
+    is_active: bool
+
+
+class MemberOut(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 # --- Financial Transaction Schemas ---

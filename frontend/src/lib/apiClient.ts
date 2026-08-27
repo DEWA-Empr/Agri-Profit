@@ -80,6 +80,19 @@ export interface CurrentUser {
   id: number;
   email: string;
   farm_id: number;
+  /** One of the roles in the backend's core/roles.py. */
+  role: string;
+  is_active: boolean;
+  /**
+   * What this account may do, as the SERVER computed it from its own role
+   * table. The nav filters on this rather than on a role list held here, so
+   * there is no client-side copy of the policy to drift.
+   *
+   * Hiding a link is a courtesy, not a control: every one of these operations
+   * is independently rejected server-side. Treat an empty or missing list as
+   * "show the safe minimum", never as "allow everything".
+   */
+  permissions: string[];
 }
 
 export const authService = {

@@ -8,7 +8,8 @@ from ...models.database import get_db
 from ...schemas import schemas
 from ...services import share_service
 from .. import throttle
-from ..deps import get_current_user
+from ...core.roles import Permission
+from ..deps import require
 
 router = APIRouter(prefix="/share", tags=["share"])
 
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/share", tags=["share"])
 def mint_link(
     payload: schemas.ShareLinkCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.SHARE_MANAGE)),
 ):
     """Mint a read-only share link for the caller's farm. The raw token is
     returned exactly once here — only its hash is stored.
@@ -36,7 +37,7 @@ def mint_link(
 
 
 @router.get("/links", response_model=List[schemas.ShareLink])
-def list_links(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def list_links(db: Session = Depends(get_db), current_user: models.User = Depends(require(Permission.SHARE_MANAGE))):
     """List the caller's share links (metadata only — the token is never
     re-served; a lost link is re-minted)."""
     return share_service.list_links(db, current_user.farm_id)
@@ -46,7 +47,7 @@ def list_links(db: Session = Depends(get_db), current_user: models.User = Depend
 def revoke_link(
     link_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require(Permission.SHARE_MANAGE)),
 ):
     """Revoke one of the caller's links (404 for a link that isn't theirs)."""
     return share_service.revoke_link(db, current_user.farm_id, link_id)
