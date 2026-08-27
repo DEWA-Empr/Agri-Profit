@@ -174,3 +174,148 @@ def test_safe_request_line_composes_method_path_and_query():
     line = logging_safety.safe_request_line("GET", "/api/v1/share/report/SECRET", "")
     assert "SECRET" not in line
     assert line.startswith("GET /api/v1/share/report/[redacted]:")
+
+
+# --- the server's own access log ------------------------------------------
+# A SECOND, INDEPENDENT LEAK, found after the middleware above was fixed.
+#
+# Uvicorn writes its own access log from the raw request target, before any
+# middleware runs and without passing through this application at all. So the
+# scrubbed line the middleware emitted sat directly above an unscrubbed one:
+#
+#   ERROR: [agriprofit] ... /api/v1/share/report/[redacted]:5e7f4f9ed044
+#   INFO:  127.0.0.1:50685 - "GET /api/v1/share/report/<the live token>" 200 OK
+#
+# and stdout — the log a department actually collects — carried a working
+# capability to a farm's finances on every investor view. Confirmed by running
+# uvicorn against this app and reading its output; fixed with a logging filter
+# on the `uvicorn.access` logger, which keeps the client address, HTTP version
+# and status that only that log carries.
+#
+# These tests construct the record uvicorn really emits rather than calling the
+# scrubbing helper, because the helper was never the thing that was broken — the
+# wiring was.
+
+TOKEN = "vY3xK9pQ2mR7tL4nB8wZ6cF1jH5dS0aG"
+
+
+def _uvicorn_access_record(target: str) -> logging.LogRecord:
+    """The record uvicorn's access logger emits, in its real shape.
+
+    Format and argument order are uvicorn's own
+    (`'%s - "%s %s HTTP/%s" %d'`), so if either changes upstream this test
+    stops resembling reality — which is the point at which the filter should be
+    re-checked rather than trusted.
+    """
+    return logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:50685", "GET", target, "1.1", 200),
+        exc_info=None,
+    )
+
+
+@pytest.fixture
+def access_logger():
+    """The real `uvicorn.access` logger with the app's filter installed."""
+    logging_safety.install_access_log_scrubber()
+    logger = logging.getLogger("uvicorn.access")
+    records: list[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    previous = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        yield logger, records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+
+
+def test_the_access_log_does_not_carry_a_raw_share_token(access_logger):
+    logger, records = access_logger
+
+    logger.handle(_uvicorn_access_record(f"/api/v1/share/report/{TOKEN}"))
+
+    assert records, "the access record was dropped instead of logged"
+    assert TOKEN not in records[0]
+    assert "[redacted]" in records[0]
+
+
+def test_the_access_log_keeps_the_diagnostics_that_live_only_there(access_logger):
+    """Scrubbing must not cost the client address, method, version or status —
+    removing the leak by removing the access log would trade one defect for
+    another."""
+    logger, records = access_logger
+
+    logger.handle(_uvicorn_access_record(f"/api/v1/share/report/{TOKEN}"))
+
+    line = records[0]
+    assert "127.0.0.1:50685" in line
+    assert "GET" in line
+    assert "HTTP/1.1" in line
+    assert "200" in line
+
+
+def test_the_access_log_leaves_an_ordinary_path_untouched(access_logger):
+    logger, records = access_logger
+
+    logger.handle(_uvicorn_access_record("/api/v1/ledger/logs?skip=0&limit=100"))
+
+    assert records[0].endswith('"GET /api/v1/ledger/logs?skip=0&limit=100 HTTP/1.1" 200')
+
+
+def test_the_access_log_redacts_a_token_passed_as_a_query_parameter(access_logger):
+    logger, records = access_logger
+
+    logger.handle(_uvicorn_access_record(f"/api/v1/anything?token={TOKEN}"))
+
+    assert TOKEN not in records[0]
+
+
+def test_two_views_of_one_link_stay_correlatable_in_the_access_log(access_logger):
+    """The fingerprint is what makes the scrubbed log still usable for "which
+    link is 404ing?" — identical tokens must produce identical handles."""
+    logger, records = access_logger
+
+    logger.handle(_uvicorn_access_record(f"/api/v1/share/report/{TOKEN}"))
+    logger.handle(_uvicorn_access_record(f"/api/v1/share/report/{TOKEN}"))
+    logger.handle(_uvicorn_access_record("/api/v1/share/report/a-different-token"))
+
+    assert records[0] == records[1]
+    assert records[2] != records[0]
+
+
+def test_installing_the_scrubber_twice_does_not_stack_filters():
+    """The app module installs on import, and importing it twice in one process
+    (which the suite does) must not attach a second copy."""
+    logging_safety.install_access_log_scrubber()
+    logging_safety.install_access_log_scrubber()
+
+    logger = logging.getLogger("uvicorn.access")
+    installed = [f for f in logger.filters if isinstance(f, logging_safety.UvicornAccessScrubber)]
+    assert len(installed) == 1
+
+
+def test_the_filter_survives_an_unexpected_record_shape():
+    """If uvicorn ever reorders its arguments, the filter must still scrub
+    rather than pass the target through because it was not where we expected."""
+    scrubber = logging_safety.UvicornAccessScrubber()
+    record = logging.LogRecord(
+        name="uvicorn.access", level=logging.INFO, pathname=__file__, lineno=1,
+        msg="%s %s",
+        args=(f"/api/v1/share/report/{TOKEN}", "reordered"),
+        exc_info=None,
+    )
+
+    scrubber.filter(record)
+
+    assert TOKEN not in record.getMessage()

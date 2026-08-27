@@ -158,3 +158,54 @@ def test_expiry_does_not_weaken_farm_scoping(make_client, db):
 
 def client_ids(c):
     return [row["id"] for row in c.get("/api/v1/share/links").json()]
+
+
+# --- the secret is returned once, and the stored form is not a credential ---
+# Two properties the suite asserted only by construction. They are cheap to
+# state behaviourally and they are exactly what an auditor asks about a bearer
+# token: where can the secret be read, and is what the database holds enough to
+# get in?
+
+def test_the_raw_token_is_returned_at_mint_and_nowhere_else(client):
+    """The mint response is the owner's ONLY chance to see the secret.
+
+    Only its SHA-256 hash is stored, so this is not merely a policy about which
+    fields are serialised — there is nothing left to re-read. Asserted against
+    the listing and the revoke response, the two places an existing link is
+    described back to its owner.
+    """
+    minted = _mint(client, label="First Bank")
+    token = minted["token"]
+    assert token
+
+    listed = client.get("/api/v1/share/links")
+    assert listed.status_code == 200
+    assert token not in listed.text
+    assert all("token" not in link for link in listed.json())
+
+    revoked = client.post(f"/api/v1/share/links/{minted['id']}/revoke")
+    assert revoked.status_code == 200
+    assert token not in revoked.text
+
+
+def test_the_stored_hash_cannot_be_used_as_the_credential(client, db):
+    """Whoever reads the database must not thereby hold a working link.
+
+    The lookup hashes what it is given, so presenting the stored hash produces
+    sha256(hash) — which matches no row. This pins that the comparison stays on
+    that side: an "optimisation" that looked the value up directly against
+    `token_hash` would turn every backup, log and DB console into a set of live
+    investor links, and would still pass every other test in this file.
+    """
+    minted = _mint(client)
+    row = _row(db, minted["id"])
+    stored_hash = row.token_hash
+
+    assert stored_hash != minted["token"]
+
+    resp = client.get(f"/api/v1/share/report/{stored_hash}")
+    assert resp.status_code == 404
+
+    # And the real token still works, so the check above is not passing because
+    # the endpoint is simply broken.
+    assert client.get(f"/api/v1/share/report/{minted['token']}").status_code == 200

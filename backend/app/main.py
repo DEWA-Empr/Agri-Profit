@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from .api.router import api_router
 from .core.config import settings
 from .core.exceptions import AppError
-from .core.logging_safety import safe_request_line
+from .core.logging_safety import install_access_log_scrubber, safe_request_line
 from .models.database import get_db
 
 # Schema is managed by Alembic migrations (applied on container startup).
@@ -29,6 +29,13 @@ if not logger.handlers:
     _handler.setFormatter(logging.Formatter("%(levelname)s:     [agriprofit] %(message)s"))
     logger.addHandler(_handler)
     logger.propagate = False
+
+# Uvicorn writes its own access log, from the raw request target, independently
+# of the middleware below. Without this the scrubbed line the middleware emits
+# sat directly above an unscrubbed one carrying the live share token. Installed
+# here rather than in the Dockerfile CMD so it holds however the app is started
+# — container, `uvicorn` by hand, or an ASGI server under test.
+install_access_log_scrubber()
 
 
 @asynccontextmanager

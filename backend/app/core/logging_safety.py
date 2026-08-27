@@ -27,6 +27,7 @@ route carries a secret in its path, add it here and add a test to
 ``test_logging_safety.py`` — the test file is the enforcement.
 """
 import hashlib
+import logging
 import re
 
 # Route shapes whose final path segment is a credential rather than an
@@ -91,3 +92,70 @@ def safe_request_line(method: str, path: str, query: str = "") -> str:
     scrubbed = scrub_path(path)
     query = scrub_query(query)
     return f"{method} {scrubbed}?{query}" if query else f"{method} {scrubbed}"
+
+
+def scrub_request_target(target: str) -> str:
+    """Scrub a raw request target — ``/path`` or ``/path?query`` as it arrived.
+
+    `scrub_path` and `scrub_query` each take one half; a server access log hands
+    over the two joined, so this splits, scrubs and rejoins them.
+    """
+    path, sep, query = target.partition("?")
+    scrubbed = scrub_path(path)
+    if not sep:
+        return scrubbed
+    return f"{scrubbed}?{scrub_query(query)}"
+
+
+class UvicornAccessScrubber(logging.Filter):
+    """Removes credentials from uvicorn's access log.
+
+    WHY THIS IS NEEDED ON TOP OF THE MIDDLEWARE. The application's own request
+    log goes through `safe_request_line` and has done since the token leak was
+    first reported. Uvicorn's access log is a SEPARATE mechanism that this
+    application does not route through: it is emitted by the server, from
+    `scope["path"]` and the raw query string, before and independently of any
+    middleware. So the app log showed `[redacted]:5e7f4f9e` while the line
+    directly beneath it read
+
+        127.0.0.1:50685 - "GET /api/v1/share/report/<the real token>" 200 OK
+
+    and the container's stdout — which is the log the department will actually
+    collect — carried a working, unexpired capability to a farm's finances on
+    every investor view. Verified by running uvicorn and reading its output; the
+    regression test in test_logging_safety.py pins it.
+
+    WHY A FILTER RATHER THAN --no-access-log. Turning the access log off would
+    remove the leak by removing the diagnostics: the client address, the HTTP
+    version and the server's own view of the status code all live there and
+    nowhere else. A filter keeps every one of those and rewrites only the
+    credential, which is the smallest change that fixes the defect.
+
+    WHY IT REWRITES EVERY STRING ARGUMENT rather than indexing the one it
+    expects. Uvicorn formats this record as
+    ``'%s - "%s %s HTTP/%s" %d' % (client, method, full_path, version, status)``.
+    Pinning to ``args[2]`` would silently stop scrubbing if that tuple were ever
+    reordered — a leak that returns quietly on a dependency upgrade. Passing
+    every string through `scrub_request_target` costs nothing (a path with no
+    credential is returned unchanged) and cannot be broken by a reordering.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                scrub_request_target(arg) if isinstance(arg, str) else arg
+                for arg in record.args
+            )
+        return True
+
+
+def install_access_log_scrubber() -> None:
+    """Attach the scrubber to uvicorn's access logger, once.
+
+    Idempotent: importing the app twice in one process (the test suite does)
+    must not stack duplicate filters. Safe to call when uvicorn is not running —
+    the logger simply exists with nothing writing to it.
+    """
+    logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, UvicornAccessScrubber) for f in logger.filters):
+        logger.addFilter(UvicornAccessScrubber())
