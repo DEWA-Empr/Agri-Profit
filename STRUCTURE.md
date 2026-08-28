@@ -122,10 +122,11 @@ frontend/src/
   main.tsx                      # ReactDOM entry — unchanged
   app/                          # the application shell (one, and only one)
     App.tsx                     # providers + <Router> + routes table ONLY
-    router.tsx                  # route → feature page mapping
+    router.tsx                  # route → feature page mapping (lazy-loaded)
+    navigation.tsx              # nav sections — the single source of nav truth
     layout/
       AppShell.tsx              # sidebar + header + <Outlet/> frame
-      Sidebar.tsx               # nav definition (single source of nav truth)
+      Sidebar.tsx               # renders the nav from app/navigation.tsx
       Header.tsx                # top bar (title, Export, Log Activity actions)
       SyncStatus.tsx            # offline/pending badges (lifted out of App.tsx)
   features/
@@ -194,7 +195,15 @@ frontend/src/
   } as const;
   ```
 - **Routes live in one table** (`app/router.tsx`), and the `Sidebar` nav reads
-  from the same route definitions so a link can never point at a missing route.
+  from `app/navigation.tsx`, whose entries mirror that table so a link can never
+  point at a missing route. Nav lives in its own module because `router.tsx`
+  exports a component, and mixing component with non-component exports breaks
+  React Fast Refresh.
+- **Every route page is `React.lazy`-loaded** behind one `<Suspense>`, and the
+  recharts-backed dashboard charts are lazy again inside their page. Pages are
+  therefore default-exported, and the entry bundle stays roughly half the size
+  it would otherwise be — which matters on the rural connections this PWA
+  targets.
 
 ---
 
@@ -288,9 +297,10 @@ Every module — existing or new — has the same shape on both ends. To add one
 9. `features/<module>/` — `KebabPage.tsx` + `api.ts` (importing
    `lib/apiClient`) + feature `components/`.
 10. `types/domain.ts` — add the shapes (mirroring step 4).
-11. `app/router.tsx` — register the route.
-12. `app/layout/Sidebar.tsx` — add the nav item (route pulled from the router
-    table, so no dead links).
+11. `app/router.tsx` — register the route (as a `React.lazy` import; the page
+    must have a default export).
+12. `app/navigation.tsx` — add the nav item; `Sidebar` renders it, so there is
+    one place to edit and no dead links.
 
 A module is "done" when: its endpoint returns real data, its page renders that
 data through the shared client and shared types, `npm run build` passes, and

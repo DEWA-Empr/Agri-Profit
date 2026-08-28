@@ -5,6 +5,8 @@ import { reportsService } from '../../../lib/apiClient';
 import type { PnlReport } from '../../../types/domain';
 import { colors, categoryColors, cardShadow } from '../../../styles/theme';
 import { SectionHeader } from './SectionHeader';
+import { NoAccess } from '../../../components/NoAccess';
+import { isForbidden } from '../../../lib/accessError';
 
 const naira = (n: number) => `₦${n.toLocaleString()}`;
 // Compact ₦ for the donut centre + legend amounts (₦132K, ₦1.2M).
@@ -21,9 +23,18 @@ interface Segment { category: string; expenses: number; share: number; color: st
 // each category's amount and percentage. Real data from GET /reports/pnl.
 export const CostBreakdown = () => {
   const [report, setReport] = useState<PnlReport | null>(null);
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
-    reportsService.getPnl().then((res) => setReport(res.data)).catch((err) => console.error(err));
+    reportsService.getPnl()
+      .then((res) => setReport(res.data))
+      .catch((err) => {
+        // A refusal renders as a refusal. Falling through left an empty donut
+        // captioned "Share of ₦0 op. cost", which states a figure about the
+        // farm that nobody measured.
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      });
   }, []);
 
   const totalExpenses = report?.expenses ?? 0;
@@ -36,6 +47,14 @@ export const CostBreakdown = () => {
       share: totalExpenses > 0 ? c.expenses / totalExpenses : 0,
       color: categoryColors[i % categoryColors.length],
     }));
+
+  if (denied) {
+    return (
+      <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, boxShadow: cardShadow, padding: '20px' }}>
+        <NoAccess what="the farm's cost breakdown" bare />
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, boxShadow: cardShadow, padding: '20px', display: 'flex', flexDirection: 'column' }}>

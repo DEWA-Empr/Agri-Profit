@@ -29,9 +29,31 @@ export default defineConfig({
         // shared device. NOTE: runtimeCaching lives only in the generated
         // production service worker; the vite dev server runs no worker, so this
         // takes effect in a built/installed PWA, not `npm run dev`.
+        //
+        // UNVERIFIED, REASONED FROM THE ORDERING — NOT AN OBSERVED FAILURE.
+        // StaleWhileRevalidate serves the cached body and starts a revalidation
+        // fetch in the background. Nothing sequences that fetch against
+        // purgeApiReadCache(): a revalidation begun BEFORE a purge can still be
+        // in flight when the purge deletes the cache, and Workbox will then
+        // write its response — a body the server produced before the mutation —
+        // into the store the next read recreates. The cache would be repopulated
+        // stale, by a fetch that predates the write.
+        //
+        // This is deduced from the handler's ordering alone. It has NOT been
+        // reproduced, provoked in a test, or seen in the wild, and no attempt is
+        // made here to close it; the window is narrow and a fix needs the worker
+        // and the app to agree on an epoch, which is out of scope for Phase 6.
+        // Treat it as a hypothesis to be tested before it is treated as a bug —
+        // and note that the Phase 6b tests (src/lib/cacheInvalidation.test.tsx)
+        // deliberately model only the SERVE half of this handler, so they do not
+        // and cannot speak to it either way.
         runtimeCaching: [
           {
-            urlPattern: /\/api\/v1\/(ledger|reports|dss\/decision-support)/,
+            // The enterprise-economics reads are listed one by one rather than
+            // matched with a bare `dss/` prefix, so /dss/model and /dss/predict
+            // stay out: model metadata is not farm data and has no business in
+            // a cache that is purged on an auth change for tenant reasons.
+            urlPattern: /\/api\/v1\/(ledger|reports|dss\/(decision-support|cost-structure|break-even-price|sensitivity|yield-baseline))/,
             handler: 'StaleWhileRevalidate',
             method: 'GET',
             options: {

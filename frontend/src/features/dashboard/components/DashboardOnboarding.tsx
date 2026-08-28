@@ -52,7 +52,7 @@ export const DashboardOnboarding = () => {
       </div>
 
       {/* Next steps */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' }}>
+      <div className="grid-2">
         {STEPS.map((s, i) => (
           <Link key={s.to} to={s.to} style={{ textDecoration: 'none', color: 'inherit' }}>
             <div style={{ ...card, padding: '22px', display: 'flex', flexDirection: 'column', gap: '10px', height: '100%' }}>

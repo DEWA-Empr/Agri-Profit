@@ -1,0 +1,115 @@
+{
+  "description": "Shared parity cases for partial budget. Expected values are hand-computed. Do not regenerate from either implementation.",
+  "read_by": [
+    "backend/tests/test_enterprise_service.py",
+    "frontend/src/features/dss/partialBudget.test.ts"
+  ],
+  "proves": "backend/app/services/enterprise_service.py::partial_budget and frontend/src/features/dss/partialBudget.ts::partialBudgetLocal return the same net change for the same inputs. The offline path is a second implementation of the online one; this file is the only thing that executes both and compares.",
+  "formula": "net_change_ngn = (added_revenue_ngn + reduced_cost_ngn) - (lost_revenue_ngn + added_cost_ngn)",
+  "field_mapping": {
+    "revenue_gained": "added_revenue_ngn",
+    "cost_saved": "reduced_cost_ngn",
+    "revenue_lost": "lost_revenue_ngn",
+    "cost_incurred": "added_cost_ngn"
+  },
+  "sign_convention": "All four inputs are non-negative. The sign lives in which slot a quantity occupies, not in the number. net_change_ngn is returned SIGNED and UNCLAMPED: a negative result means the change is not worth making, and is a real and reportable answer.",
+  "case_count": 8,
+  "cases": [
+    {
+      "id": "PB-1",
+      "description": "The sign case, and the reason this fixture exists. Verified by hand during Phase 6 by stopping agrip-backend-1 mid-session; the offline path returned -NGN 21,500.00. A sign flip between implementations must fail here, so the sign is asserted explicitly and separately from the magnitude.",
+      "arithmetic": "117000 - 138500",
+      "inputs": {
+        "added_revenue_ngn": 96000,
+        "reduced_cost_ngn": 21000,
+        "lost_revenue_ngn": 0,
+        "added_cost_ngn": 138500
+      },
+      "expected": -21500
+    },
+    {
+      "id": "PB-2",
+      "description": "The ordinary positive case. Already exercised on the backend at test_enterprise_service.py:348; now exercised on both sides with one input.",
+      "arithmetic": "15000 - 9500",
+      "inputs": {
+        "added_revenue_ngn": 12000,
+        "reduced_cost_ngn": 3000,
+        "lost_revenue_ngn": 0,
+        "added_cost_ngn": 9500
+      },
+      "expected": 5500
+    },
+    {
+      "id": "PB-3",
+      "description": "Exact zero from non-zero terms: the boundary between better off and worse off. The result must be 0 and not -0, because a negative zero rendering as \"-NGN 0.00\" would tell a farmer they are worse off when they are exactly even.",
+      "arithmetic": "35000 - 35000",
+      "inputs": {
+        "added_revenue_ngn": 30000,
+        "reduced_cost_ngn": 5000,
+        "lost_revenue_ngn": 20000,
+        "added_cost_ngn": 15000
+      },
+      "expected": 0
+    },
+    {
+      "id": "PB-4",
+      "description": "All zeros. Distinguishes \"no change recorded\" from a computation that happens to return zero. Both implementations must return 0, and neither may return null or throw.",
+      "arithmetic": "0 - 0",
+      "inputs": {
+        "added_revenue_ngn": 0,
+        "reduced_cost_ngn": 0,
+        "lost_revenue_ngn": 0,
+        "added_cost_ngn": 0
+      },
+      "expected": 0
+    },
+    {
+      "id": "PB-5",
+      "description": "Gains only, no losses. Exercises the loss side summing to zero without short-circuiting.",
+      "arithmetic": "45000 - 0",
+      "inputs": {
+        "added_revenue_ngn": 45000,
+        "reduced_cost_ngn": 0,
+        "lost_revenue_ngn": 0,
+        "added_cost_ngn": 0
+      },
+      "expected": 45000
+    },
+    {
+      "id": "PB-6",
+      "description": "Losses only, no gains: the mirror of PB-5. Already exercised on the frontend; now on both.",
+      "arithmetic": "0 - 52500",
+      "inputs": {
+        "added_revenue_ngn": 0,
+        "reduced_cost_ngn": 0,
+        "lost_revenue_ngn": 40000,
+        "added_cost_ngn": 12500
+      },
+      "expected": -52500
+    },
+    {
+      "id": "PB-7",
+      "description": "Kobo precision. Catches divergence in float handling and any premature rounding. Compared at rel=1e-9, tighter than the rel=1e-4 used elsewhere in the suite. If either implementation rounds internally, this fails and that is the finding.",
+      "arithmetic": "1313.46 - 1200.26",
+      "inputs": {
+        "added_revenue_ngn": 1234.56,
+        "reduced_cost_ngn": 78.90,
+        "lost_revenue_ngn": 200.25,
+        "added_cost_ngn": 1000.01
+      },
+      "expected": 113.20
+    },
+    {
+      "id": "PB-8",
+      "description": "Cross-pair transposition trap. Swapping reduced_cost_ngn with added_cost_ngn gives 60000 - 5000 = +55000, a different figure of the opposite sign. Any implementation that confuses a saved cost for an incurred one fails here rather than passing by symmetry.",
+      "arithmetic": "12000 - 53000",
+      "inputs": {
+        "added_revenue_ngn": 10000,
+        "reduced_cost_ngn": 2000,
+        "lost_revenue_ngn": 3000,
+        "added_cost_ngn": 50000
+      },
+      "expected": -41000
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+# TLS edge for a deployment with no institutional reverse proxy in front.
+#
+# Caddy obtains and renews a certificate from Let's Encrypt automatically, which
+# is why it is here rather than an nginx + certbot pair: the renewal is the part
+# that fails silently eighteen months later, and this removes it as a thing
+# anybody has to remember.
+#
+# The API is proxied under the same origin as the app deliberately. Same-origin
+# means the browser sends no CORS preflight, the service worker can cache API
+# reads without an opaque-response problem, and CORS_ORIGINS has exactly one
+# value to get right.
+
+{$CADDY_DOMAIN} {
+	encode gzip
+
+	# API first — more specific path wins.
+	#
+	# `handle`, NOT `handle_path`. handle_path STRIPS the matched prefix, so
+	# /api/v1/ledger/logs reached the backend as /v1/ledger/logs — and the
+	# backend mounts every route under /api/v1 (main.py: include_router(...,
+	# prefix="/api/v1")). Every API call through this edge answered 404, which
+	# is to say the TLS deployment had never served a request. Verified by
+	# proxying to a backend that echoed the path it received; the CI smoke job
+	# now proves the whole chain end to end.
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			# The backend reads this for per-IP rate limiting, which is why
+			# TRUST_PROXY_HEADERS may be enabled: this hop overwrites whatever
+			# the client sent, so the value can be believed.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# Liveness and readiness live at the backend's application root, not under
+	# /api, so they need their own route ahead of the catch-all — otherwise
+	# they reach the frontend and answer with the SPA shell.
+	handle /health* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:8080
+	}
+
+	header {
+		# HSTS: once a browser has seen this it will refuse plain HTTP for the
+		# domain. Deliberate — a PWA will not install on an insecure origin, and
+		# a share token in a URL must never travel in clear.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}

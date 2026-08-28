@@ -5,8 +5,28 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from backend.app.core.rate_limit import limiter
 from backend.app.main import app
 from backend.app.models.database import Base, get_db
+
+
+@pytest.fixture(autouse=True)
+def _isolate_rate_limits():
+    """Every test starts with empty rate-limit counters.
+
+    The limiter is process-global by design, so without this a test that
+    registers three farms would leave three hits on the shared client IP and the
+    next test would inherit them — tests would pass or fail depending on
+    execution order, which is the same reason each test already gets its own
+    database.
+
+    This weakens no assertion. The limits themselves are unchanged and are
+    exercised deliberately in `test_rate_limit.py`; this only stops one test's
+    traffic counting against another's.
+    """
+    limiter.reset()
+    yield
+    limiter.reset()
 
 # Each test gets its own in-memory SQLite database. StaticPool keeps the single
 # in-memory connection alive for the duration of the test so the schema and data

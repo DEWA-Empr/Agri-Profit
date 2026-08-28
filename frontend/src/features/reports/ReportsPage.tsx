@@ -4,17 +4,30 @@ import { reportsService } from '../../lib/apiClient';
 import type { PnlReport } from '../../types/domain';
 import { downloadPnlCsv } from './downloadPnlCsv';
 import { colors } from '../../styles/theme';
+import { NoAccess } from '../../components/NoAccess';
+import { isForbidden } from '../../lib/accessError';
 
 const ReportsPage = () => {
   const [report, setReport] = useState<PnlReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     reportsService.getPnl()
       .then((res) => setReport(res.data))
-      .catch((err) => console.error(err))
+      .catch((err) => {
+        if (isForbidden(err)) setDenied(true);
+        else console.error(err);
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  // The route guard sends a caller without finance:read to /records before this
+  // mounts. This covers what the guard cannot: access withdrawn mid-session, or
+  // a role changed in another tab.
+  if (denied) {
+    return <NoAccess what="the farm's profit and loss report" />;
+  }
 
   const th: CSSProperties = { textAlign: 'left', fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em', color: colors.textMuted, textTransform: 'uppercase', padding: '10px 12px', borderBottom: `0.5px solid ${colors.border}` };
   const thRight: CSSProperties = { ...th, textAlign: 'right' };
@@ -24,7 +37,7 @@ const ReportsPage = () => {
   const naira = (n: number) => `₦${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const summaryCard = (label: string, value: number, icon: React.ReactNode, color: string) => (
-    <div style={{ flex: 1, background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '16px' }}>
+    <div style={{ flex: '1 1 150px', minWidth: '150px', background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, padding: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color }}>{icon}<span style={{ fontSize: '11px', color: colors.textMuted, fontWeight: 600 }}>{label}</span></div>
       <p style={{ fontSize: '22px', fontWeight: 500, color, marginTop: '10px', letterSpacing: '-0.5px' }}>{naira(value)}</p>
     </div>
@@ -47,14 +60,14 @@ const ReportsPage = () => {
         <p style={{ fontSize: '12px', color: colors.danger }}>Could not load the report.</p>
       ) : (
         <>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             {summaryCard('Total Revenue', report.revenue, <TrendingUp size={16} />, colors.primaryDark)}
             {summaryCard('Total Expenses', report.expenses, <TrendingDown size={16} />, colors.dangerAlt)}
             {summaryCard('Gross Margin', report.gross_margin, <Wallet size={16} />, report.gross_margin >= 0 ? colors.info : colors.dangerAlt)}
           </div>
 
           <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
                   <th style={th}>Category</th>
@@ -81,7 +94,7 @@ const ReportsPage = () => {
                   <td style={{ ...tdRight, fontWeight: 700, borderTop: `1px solid ${colors.border}`, color: report.gross_margin >= 0 ? colors.primaryDark : colors.danger }}>{naira(report.gross_margin)}</td>
                 </tr>
               </tfoot>
-            </table>
+            </table></div>
           </div>
         </>
       )}

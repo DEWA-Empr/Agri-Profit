@@ -58,6 +58,13 @@ def create_operational_log(db: Session, farm_id: int, log: schemas.OperationalLo
         # A concurrent request with the same client_id won the race and the
         # unique index rejected this insert. Treat it as the same idempotent
         # outcome and return the row the winner created (200, not 500).
+        #
+        # Since e6a2b4c7d130 the constraint is UNIQUE(farm_id, client_id), so
+        # the only insert this can reject is a same-farm replay — which is
+        # exactly what the lookup below recovers. It used to be a GLOBAL unique
+        # index, and a cross-farm collision then fell past the lookup to the
+        # bare `raise` and out as a 500. Anything still reaching that `raise` is
+        # a genuinely unexpected integrity failure and should stay a 500.
         db.rollback()
         if log.client_id:
             existing = _find_by_client_id(db, farm_id, log.client_id)

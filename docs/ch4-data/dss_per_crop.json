@@ -1,0 +1,61 @@
+{
+  "crops": [
+    {
+      "crop": "cassava",
+      "revenue": 178600.0,
+      "expenses": 94400.0,
+      "gross_margin": 84200.0,
+      "yield_quantity": 1880.0,
+      "yield_unit": "kg",
+      "yield_by_unit": [
+        {
+          "unit": "kg",
+          "quantity": 1880.0
+        }
+      ],
+      "unit_cost_of_production": 50.212765957446805,
+      "marketable_mass_kg": null,
+      "unit_cost_per_kg_marketable": null,
+      "break_even_yield": 993.6842105263158,
+      "break_even_unit": "kg"
+    },
+    {
+      "crop": "maize",
+      "revenue": 45000.0,
+      "expenses": 3500.0,
+      "gross_margin": 41500.0,
+      "yield_quantity": 100.0,
+      "yield_unit": "kg",
+      "yield_by_unit": [
+        {
+          "unit": "kg",
+          "quantity": 100.0
+        }
+      ],
+      "unit_cost_of_production": 35.0,
+      "marketable_mass_kg": 84.0,
+      "unit_cost_per_kg_marketable": 41.666666666666664,
+      "break_even_yield": 7.777777777777778,
+      "break_even_unit": "kg"
+    },
+    {
+      "crop": "tomato",
+      "revenue": 0.0,
+      "expenses": 112900.0,
+      "gross_margin": -112900.0,
+      "yield_quantity": 0.0,
+      "yield_unit": null,
+      "yield_by_unit": [],
+      "unit_cost_of_production": null,
+      "marketable_mass_kg": null,
+      "unit_cost_per_kg_marketable": null,
+      "break_even_yield": null,
+      "break_even_unit": null
+    }
+  ],
+  "overall": {
+    "revenue": 223600.0,
+    "expenses": 210800.0,
+    "gross_margin": 12800.0
+  }
+}

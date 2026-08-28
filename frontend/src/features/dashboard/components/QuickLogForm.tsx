@@ -35,11 +35,14 @@ export const QuickLogForm: React.FC<QuickLogFormProps> = ({ isOnline, pendingCou
 
     const result = await saveOperationalLog(payload, isOnline);
     setForm({ ...form, item: '', amount: '' });
-    if (result === 'saved') {
+    if (result.status === 'saved') {
       setSaveMessage('');
       onSaved();
-    } else if (result === 'offline') {
+    } else if (result.status === 'offline') {
       setSaveMessage('Saved offline — will sync when connected.');
+    } else if (result.status === 'unauthenticated') {
+      // Nothing was queued — see FarmRecordCreateForm for why.
+      setSaveMessage('Your session has ended. Sign in again, then re-enter this record.');
     } else {
       setSaveMessage('Network error — saved offline. Will retry when connected.');
     }

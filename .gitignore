@@ -13,6 +13,10 @@ venv/
 env/
 *.env
 .env.*
+# ...but the TEMPLATE is documentation, not a secret, and is the only record of
+# which variables a deployment must set. It holds names and comments, never
+# values. Keep this negation below the patterns above or git ignores it.
+!.env.example
 
 # Database
 *.db

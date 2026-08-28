@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Enum, Text, JSON, Boolean
+from sqlalchemy import (
+    Column, Integer, String, Float, DateTime, ForeignKey, Enum, Text, JSON, Boolean,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from ..core.enums import Category, TransactionType
@@ -27,6 +30,17 @@ class User(Base):
     # bcrypt hash via passlib — the plaintext password is never stored.
     hashed_password = Column(String, nullable=False)
     farm_id = Column(Integer, ForeignKey("farms.id"), nullable=False)
+    # What this account may do within its farm — one of core.roles.Role. A
+    # string rather than a database enum so adding a role later is a code change
+    # rather than a type rewrite. NOT NULL with a default of "owner": every
+    # account that predates authorization was the sole user of its own farm, so
+    # owner is what each already was (migration a8d4e1c60b27).
+    role = Column(String, nullable=False, default="owner", server_default="owner")
+    # Access is withdrawn by clearing this, never by deleting the row — the
+    # records the user entered must keep their author, and the ledger does not
+    # delete. Checked in api/deps.get_current_user, so a deactivated account's
+    # existing token stops working on its next request rather than at expiry.
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     farm = relationship("Farm", back_populates="users")
@@ -54,6 +68,13 @@ class ShareToken(Base):
     token_hash = Column(String, unique=True, nullable=False, index=True)
     label = Column(String, nullable=True)  # optional note, e.g. "First Bank"
     revoked = Column(Boolean, nullable=False, default=False)
+    # When the capability stops working on its own. NULL means "never" and is
+    # reserved for tokens minted before expiry existed (migration f7b3c2d94e15) —
+    # the service gives every NEW token a real expiry, so an unrevoked link
+    # cannot outlive the assessment it was shared for. Read only by
+    # share_service.get_report_by_token, which treats expired exactly as it
+    # treats revoked: a 404, with no hint that the token was ever valid.
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     farm = relationship("Farm")
@@ -61,6 +82,12 @@ class ShareToken(Base):
 
 class OperationalLog(Base):
     __tablename__ = "operational_logs"
+    __table_args__ = (
+        # Idempotency is per tenant, so uniqueness is too. NULL client_ids are
+        # exempt in both Postgres and SQLite (NULLs are never equal), which is
+        # what lets every non-offline log leave the column empty.
+        UniqueConstraint("farm_id", "client_id", name="uq_operational_logs_farm_client"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     # Owning tenant. NOT NULL: every log is stamped with the author's farm at
@@ -80,7 +107,15 @@ class OperationalLog(Base):
     # of the Tier-1 decision-support report. Indexed for per-crop grouping.
     crop = Column(String, nullable=True, index=True)
 
-    client_id = Column(String, unique=True, nullable=True, index=True)
+    # Client-generated idempotency key for offline writes. Unique PER FARM, not
+    # globally: `ledger_service._find_by_client_id` has always matched a replay
+    # within the author's own farm, and a global unique index contradicted that
+    # — two farms using the same key (the seed script's fixed keys, or any two
+    # devices that agree on a scheme) collided at the index, missed the
+    # farm-scoped recovery lookup, and surfaced as a 500. The global index
+    # predates tenancy: it was written in 544b85dc2d20, before farm_id existed.
+    # See migration e6a2b4c7d130.
+    client_id = Column(String, nullable=True, index=True)
 
     # Reversal link (ticket 10): a reversing entry points at the log it offsets
     # (self-referential FK). Ledger records are immutable — a mistaken log is
@@ -129,7 +164,19 @@ class Equipment(Base):
     model = Column(String)
     purchase_date = Column(DateTime)
     purchase_price = Column(Float)
-    depreciation_rate = Column(Float)  # Annual percentage
+    # Annual percentage: 10.0 means 10%/yr, the unit the farmer enters and
+    # reads. It is converted to a fraction exactly once, in
+    # dss_service.depreciation_rate_as_fraction, where equipment rows are
+    # assembled into the depreciation overlay's input. Nowhere else divides.
+    # Nullable: an asset entered without a rate is excluded from the overlay
+    # and counted there, never charged at zero.
+    depreciation_rate = Column(Float)
+    # Stamped when the asset is corrected; NULL means "as originally entered".
+    # A correction moves the depreciation overlay and therefore both break-even
+    # prices, so the fact that one happened must be visible rather than silent
+    # (migration b9e5f30c74a1). Not `onupdate=`: that would fire on any flush
+    # touching the row, and only a deliberate correction should be recorded.
+    updated_at = Column(DateTime(timezone=True), nullable=True)
 
 class MaintenanceLog(Base):
     __tablename__ = "maintenance_logs"

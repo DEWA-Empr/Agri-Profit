@@ -1,5 +1,11 @@
 name: CI
 
+# Validation runs on every pull request and on main. There is no deployment job
+# here on purpose: this repository builds and verifies, and a departmental
+# deployment is a deliberate act performed against docs/DEPLOYMENT.md, not
+# something that happens because a branch moved. See that document for the
+# release procedure and the rollback step.
+
 on:
   push:
     branches: [main]
@@ -28,6 +34,55 @@ jobs:
           DATABASE_URL: sqlite:///./test.db
         run: python -m pytest backend/tests/ -v
 
+      - name: Coverage
+        env:
+          DATABASE_URL: sqlite:///./test.db
+        run: python -m pytest backend/tests/ -q --cov=backend/app --cov-report=term
+
+  migrations:
+    name: Migration chain (PostgreSQL)
+    runs-on: ubuntu-latest
+
+    # The rest of the suite builds its schema with Base.metadata.create_all,
+    # which is blind to Alembic — so without this job a broken migration keeps
+    # CI green and fails on the next deployment instead. It runs against real
+    # PostgreSQL because the chain uses ALTER-constraint operations that SQLite
+    # does not support; that is a property of the migrations, not a gap in them.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agriprofit_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Verify the chain runs, matches the models, and rolls back
+        env:
+          # A throwaway database created by the service above. The fixture drops
+          # and recreates the schema around every test.
+          MIGRATION_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agriprofit_migrations
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agriprofit_migrations
+        run: python -m pytest backend/tests/test_migrations.py -v
+
   frontend:
     name: Frontend tests & build
     runs-on: ubuntu-latest
@@ -49,6 +104,278 @@ jobs:
         working-directory: frontend
         run: npm run test
 
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
       - name: Type-check and build
         working-directory: frontend
         run: npm run build
+
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      # The security boundaries are asserted by tests rather than by a scanner,
+      # because a scanner cannot tell whether a 403 is the RIGHT 403. These are
+      # already covered by the backend job; running them again on their own means
+      # a failure here names the boundary that broke instead of being one line in
+      # a 360-test log.
+      - name: Authorization, token handling and input bounds
+        env:
+          DATABASE_URL: sqlite:///./test.db
+        run: |
+          python -m pytest -v \
+            backend/tests/test_authorization.py \
+            backend/tests/test_logging_safety.py \
+            backend/tests/test_rate_limit.py \
+            backend/tests/test_share_lifecycle.py \
+            backend/tests/test_input_validation.py
+
+      - name: Known vulnerabilities in dependencies
+        # Advisory: it reports against the installed set and is allowed to fail
+        # the step without failing the run, because a new advisory published
+        # overnight should raise a flag, not block an unrelated pull request.
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit --requirement backend/requirements.txt --strict || true
+
+      - name: No secrets committed
+        # A narrow, high-signal check: the two shapes this repository could
+        # plausibly leak. Not a general scanner — one of those belongs in the
+        # organisation's tooling, not in a project CI file where it would mostly
+        # produce noise.
+        run: |
+          set -e
+          if git ls-files -z | xargs -0 grep -lE '^\s*SECRET_KEY\s*=\s*["'"'"'][^"'"'"']{16,}' -- 2>/dev/null | grep -v '.env.example'; then
+            echo "::error::A SECRET_KEY literal appears to be committed."
+            exit 1
+          fi
+          if git ls-files | grep -qE '(^|/)\.env$'; then
+            echo "::error::A .env file is tracked. Secrets must come from the environment."
+            exit 1
+          fi
+          echo "No committed secrets found."
+
+  deployment:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+
+    # The production compose file is the deployment. Nothing else in this
+    # workflow reads it, so a change that makes `up -d` refuse to start was
+    # invisible here until somebody tried to deploy — which is the worst moment
+    # to find out. These checks are cheap and need no images built.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The documented deploy command renders with only .env.example set
+        # REGRESSION GUARD. Compose interpolates EVERY service in the file, even
+        # ones behind a profile that is not selected. A `${VAR:?...}` on the
+        # optional `caddy` service therefore broke the ordinary deployment
+        # command for every department that terminates TLS elsewhere — which
+        # docs/DEPLOYMENT.md says most of them do. Rendering the file with no
+        # profile selected catches that class of mistake.
+        run: |
+          set -e
+          # The values a real deployment supplies, and nothing more. If a
+          # service outside the `edge` profile grows a new required variable,
+          # this fails until .env.example documents it too.
+          cat > .env <<'ENV'
+          ENVIRONMENT=production
+          SECRET_KEY=ci-placeholder-not-a-real-key
+          DATABASE_URL=postgresql://agriprofit:placeholder@db:5432/agriprofit
+          POSTGRES_USER=agriprofit
+          POSTGRES_PASSWORD=placeholder
+          POSTGRES_DB=agriprofit
+          CORS_ORIGINS=["https://agriprofit.example.edu"]
+          ENV
+          docker compose -f docker-compose.prod.yml config --quiet
+          echo "Production compose renders without the edge profile."
+
+      - name: The optional TLS edge still renders when it is selected
+        run: |
+          set -e
+          CADDY_DOMAIN=agriprofit.example.edu \
+            docker compose -f docker-compose.prod.yml --profile edge config --quiet
+          echo "Edge profile renders."
+
+      - name: The database publishes no host port in production
+        # Publishing 5432 is how a development convenience becomes an
+        # internet-facing Postgres; the prod file deliberately omits it.
+        run: |
+          set -e
+          if docker compose -f docker-compose.prod.yml config \
+               | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); sys.exit(0 if d['services']['db'].get('ports') else 1)"; then
+            echo "::error::docker-compose.prod.yml publishes a host port for the database."
+            exit 1
+          fi
+          echo "Database is reachable on the compose network only."
+
+      - name: The ops scripts are valid shell
+        run: |
+          set -e
+          sh -n ops/backup.sh
+          sh -n ops/restore.sh
+          echo "ops/backup.sh and ops/restore.sh parse."
+
+  smoke:
+    name: Production stack HTTP smoke test
+    runs-on: ubuntu-latest
+
+    # WHY THIS JOB EXISTS. Everything else in this workflow tests the code or
+    # parses the configuration; nothing started the production stack and asked
+    # it for a page. That gap let two blockers ship at once: Caddy's
+    # `handle_path` stripped the /api prefix the backend mounts its routes
+    # under, and the frontend's nginx had no /api proxy at all, so every API
+    # call fell through the SPA fallback and returned 200 text/html. Both
+    # deployment paths were dead while every test was green and every container
+    # reported healthy.
+    #
+    # The assertions below are deliberately about CONTENT TYPE and PARSED JSON
+    # rather than status codes. The broken build returned HTTP 200 for
+    # /api/v1/... — a status-only check would have passed on it.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Disposable production configuration
+        # Throwaway values for a container that lives for one job. The point is
+        # to exercise the real docker-compose.prod.yml, which refuses to start
+        # without every one of these.
+        run: |
+          cat > .env <<'ENV'
+          ENVIRONMENT=production
+          SECRET_KEY=ci-smoke-test-key-not-used-anywhere-else
+          DATABASE_URL=postgresql://agriprofit:ci-smoke-pw@db:5432/agriprofit
+          POSTGRES_USER=agriprofit
+          POSTGRES_PASSWORD=ci-smoke-pw
+          POSTGRES_DB=agriprofit
+          CORS_ORIGINS=["http://localhost:8080"]
+          TRUST_PROXY_HEADERS=true
+          VITE_API_URL=/api/v1
+          ENV
+
+      - name: Build and start the production stack
+        run: docker compose -f docker-compose.prod.yml up -d --build
+
+      - name: Wait for every service to report healthy
+        run: |
+          for i in $(seq 1 60); do
+            unhealthy=$(docker compose -f docker-compose.prod.yml ps \
+              --format '{{.Service}}:{{.Health}}' | grep -v ':healthy' || true)
+            if [ -z "$unhealthy" ]; then echo "all healthy"; exit 0; fi
+            echo "waiting: $unhealthy"; sleep 5
+          done
+          echo "::error::services did not become healthy"
+          docker compose -f docker-compose.prod.yml ps
+          docker compose -f docker-compose.prod.yml logs --tail=50
+          exit 1
+
+      - name: The frontend serves the app
+        run: |
+          set -e
+          type=$(curl -sf -o /dev/null -w '%{content_type}' http://127.0.0.1:8080/)
+          echo "GET / -> $type"
+          case "$type" in text/html*) ;; *) echo "::error::/ did not serve HTML"; exit 1;; esac
+
+      - name: Readiness reaches the BACKEND, not the SPA fallback
+        # The precise regression: this used to answer 200 text/html from the
+        # frontend, so `curl -fsS` exited 0 while proving nothing.
+        run: |
+          set -e
+          body=$(curl -sf http://127.0.0.1:8080/health/ready)
+          echo "$body"
+          echo "$body" | grep -q '"database":"ok"' \
+            || { echo "::error::readiness did not come from the backend"; exit 1; }
+
+      - name: API routes reach the backend with the /api prefix intact
+        run: |
+          set -e
+          type=$(curl -s -o /dev/null -w '%{content_type}' http://127.0.0.1:8080/api/v1/ledger/logs)
+          echo "GET /api/v1/ledger/logs -> $type"
+          case "$type" in
+            application/json*) ;;
+            *) echo "::error::API path served $type — the proxy is not reaching the backend"; exit 1;;
+          esac
+
+      - name: A real user can register, log in and call a protected endpoint
+        run: |
+          set -e
+          base=http://127.0.0.1:8080/api/v1
+          curl -sf -X POST $base/auth/register -H 'Content-Type: application/json' \
+            -d '{"email":"ci-smoke@test.example","password":"ci-smoke-pw-12345","farm_name":"CI Farm"}' > /dev/null
+          token=$(curl -sf -X POST $base/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"ci-smoke@test.example","password":"ci-smoke-pw-12345"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          [ -n "$token" ] || { echo "::error::login returned no token"; exit 1; }
+          role=$(curl -sf -H "Authorization: Bearer $token" $base/auth/me \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["role"])')
+          echo "authenticated as role=$role"
+          [ "$role" = "owner" ] || { echo "::error::unexpected role $role"; exit 1; }
+
+      - name: An investor report is reachable by token, and the token is not logged
+        run: |
+          set -e
+          base=http://127.0.0.1:8080/api/v1
+          token=$(curl -sf -X POST $base/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"ci-smoke@test.example","password":"ci-smoke-pw-12345"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          share=$(curl -sf -X POST $base/share/links -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' -d '{"label":"CI"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+          curl -sf $base/share/report/$share | grep -q '"farm_name"' \
+            || { echo "::error::investor report did not load through the proxy"; exit 1; }
+          curl -sf -o /dev/null http://127.0.0.1:8080/investor/$share
+          sleep 2
+          # Every layer in front of the report logs the request: nginx, the app's
+          # own middleware and uvicorn's access log. All three must scrub.
+          if docker compose -f docker-compose.prod.yml logs 2>&1 | grep -q "$share"; then
+            echo "::error::a raw share token reached the logs"
+            exit 1
+          fi
+          echo "share token absent from all container logs"
+
+      - name: Unknown paths still reach the SPA, not the API
+        run: |
+          set -e
+          type=$(curl -s -o /dev/null -w '%{content_type}' http://127.0.0.1:8080/no-such-page)
+          case "$type" in text/html*) ;; *) echo "::error::SPA fallback broken"; exit 1;; esac
+
+      - name: The database is not published to the host
+        run: |
+          set -e
+          if docker compose -f docker-compose.prod.yml ps --format '{{.Service}} {{.Ports}}' \
+               | grep '^db ' | grep -q '0.0.0.0\|127.0.0.1'; then
+            echo "::error::the database is published to the host"
+            exit 1
+          fi
+          echo "database is reachable only on the compose network"
+
+      - name: Both application containers run as non-root
+        run: |
+          set -e
+          for svc in backend frontend; do
+            uid=$(docker compose -f docker-compose.prod.yml exec -T $svc id -u)
+            echo "$svc uid=$uid"
+            [ "$uid" != "0" ] || { echo "::error::$svc runs as root"; exit 1; }
+          done
+
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --tail=120
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v

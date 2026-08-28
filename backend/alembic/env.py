@@ -1,8 +1,20 @@
 import os
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+
+# Make `app` importable regardless of the working directory alembic was invoked
+# from. alembic.ini's `prepend_sys_path = .` resolves against the CWD, which is
+# only correct when alembic is run from inside backend/ (as the container does).
+# The test suite and the CI migrations job run pytest from the repository root,
+# where `.` is the repo and `app` is a directory down — so the import below
+# failed there and the chain was never actually executed. Anchoring to this
+# file's own location makes the invocation directory irrelevant.
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 # Import the models' metadata so autogenerate can detect schema changes.
 from app.models.models import Base

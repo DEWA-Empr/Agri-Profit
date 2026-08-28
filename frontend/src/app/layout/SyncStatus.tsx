@@ -3,6 +3,7 @@ import { liveQuery } from 'dexie';
 import { WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { db } from '../../lib/db';
 import { retryFailedLogs } from '../../lib/sync';
+import { currentOwnerKey } from '../../lib/queueOwner';
 import { colors } from '../../styles/theme';
 
 // Sidebar footer indicator: shown only when offline, when logs are queued, or
@@ -13,9 +14,13 @@ export const SyncStatus: FC<{ isOnline: boolean; pendingCount: number }> = ({ is
   const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
-    const sub = liveQuery(() =>
-      db.pendingLogs.where('status').equals('failed').count()
-    ).subscribe({ next: setFailedCount, error: () => {} });
+    // Scoped to the signed-in account, like every other queue read — another
+    // farm's stranded rows are not this farm's problem to see or to retry.
+    const sub = liveQuery(() => {
+      const owner = currentOwnerKey();
+      if (!owner) return Promise.resolve(0);
+      return db.pendingLogs.where('[ownerKey+status]').equals([owner, 'failed']).count();
+    }).subscribe({ next: setFailedCount, error: () => {} });
     return () => sub.unsubscribe();
   }, []);
 

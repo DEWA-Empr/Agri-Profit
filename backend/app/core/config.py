@@ -46,6 +46,53 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24h
 
+    # --- Investor share links -------------------------------------------
+    # Lifetime given to a newly minted share link when the caller names none.
+    # A share token is a bearer credential with no second factor, so it should
+    # not outlive the assessment it was shared for. Ninety days covers a loan or
+    # grant cycle; the caller may ask for anything from 1 to 365 days.
+    # Links minted before expiry existed carry NULL and never expire — see
+    # migration f7b3c2d94e15.
+    share_link_default_ttl_days: int = 90
+
+    # --- Model training --------------------------------------------------
+    # Whether POST /dss/train may retrain the yield model over the API. OFF.
+    # There is one model artefact and every farm's forecast is served from it,
+    # so retraining is a cross-tenant side effect on shared state. The supported
+    # path is out-of-band: `python -m backend.app.ml.train`, or a restart, which
+    # trains on boot when no artefact is present. Even with this on, the route
+    # additionally needs Permission.MODEL_TRAIN, which no role grants.
+    allow_api_model_training: bool = False
+
+    # --- Rate limiting ---------------------------------------------------
+    # In-process fixed-window counters (core/rate_limit.py). Sized for a
+    # single-container departmental deployment; see that module on why a
+    # distributed limiter is not warranted here and what changes if it becomes
+    # one. Set RATE_LIMIT_ENABLED=false only to diagnose a lockout.
+    rate_limit_enabled: bool = True
+    # Whether X-Forwarded-For may be believed when identifying a caller. OFF by
+    # default: a client can send that header itself, so trusting it without a
+    # proxy in front means every per-IP limit below can be bypassed by rotating
+    # a string. Turn it on ONLY when a reverse proxy you control always
+    # overwrites the header (see docs/OPERATIONS.md).
+    trust_proxy_headers: bool = False
+    # Failed logins tolerated per window, counted per account and per client IP
+    # independently — the first stops a targeted guess, the second stops one
+    # host spraying many accounts.
+    login_max_attempts: int = 10
+    login_window_seconds: int = 900          # 15 minutes
+    login_ip_max_attempts: int = 30
+    # Registration is the cheapest way to fill the database, so it is capped per
+    # IP over a long window. Generous enough for a department onboarding a
+    # cohort from one network in a sitting.
+    register_max_attempts: int = 20
+    register_window_seconds: int = 3600      # 1 hour
+    # The public investor report is the one unauthenticated read path. A 256-bit
+    # token is not guessable, but an open endpoint still invites probing and
+    # costs a database round trip per attempt.
+    share_report_max_attempts: int = 60
+    share_report_window_seconds: int = 300   # 5 minutes
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @model_validator(mode="after")

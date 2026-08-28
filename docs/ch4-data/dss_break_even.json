@@ -1,0 +1,32 @@
+{
+  "_source": "GET /api/v1/dss/decision-support (no separate break-even route exists); values copied verbatim from the same response saved as dss_per_crop.json",
+  "crops": [
+    {
+      "crop": "cassava",
+      "revenue": 178600.0,
+      "expenses": 94400.0,
+      "yield_quantity": 1880.0,
+      "yield_unit": "kg",
+      "break_even_yield": 993.6842105263158,
+      "break_even_unit": "kg"
+    },
+    {
+      "crop": "maize",
+      "revenue": 45000.0,
+      "expenses": 3500.0,
+      "yield_quantity": 100.0,
+      "yield_unit": "kg",
+      "break_even_yield": 7.777777777777778,
+      "break_even_unit": "kg"
+    },
+    {
+      "crop": "tomato",
+      "revenue": 0.0,
+      "expenses": 112900.0,
+      "yield_quantity": 0.0,
+      "yield_unit": null,
+      "break_even_yield": null,
+      "break_even_unit": null
+    }
+  ]
+}
