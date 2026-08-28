@@ -11,27 +11,56 @@ Operating it afterwards — backups, restores, incidents — is `docs/OPERATIONS
 
 ## 1. What gets deployed
 
+There are **two supported patterns**, and they differ only in what terminates
+TLS. In both, the frontend container is the single HTTP entry point into the
+stack and routes `/api` to the backend itself.
+
+**Pattern A — behind your institution's TLS (the common case).**
+
 ```
-                    ┌─────────────────────────────────────────┐
-  browser ──HTTPS──▶│  edge (Caddy, optional)                 │
-                    │  · terminates TLS, renews automatically │
-                    │  · /api/*  ──▶ backend:8000             │
-                    │  · /*      ──▶ frontend:8080            │
-                    └───────────────┬─────────────────────────┘
-                                    │  (compose network, no published ports)
-                    ┌───────────────┴───────────────┐
-                    ▼                               ▼
+  browser ──HTTPS──▶ institutional reverse proxy ──HTTP──▶ 127.0.0.1:8080
+                                                                │
+                                                    ┌───────────┴───────────┐
+                                                    │ frontend (nginx)      │
+                                                    │ · /api/*  ─▶ backend  │
+                                                    │ · /health* ─▶ backend │
+                                                    │ · /*       ─▶ SPA     │
+                                                    └───────────┬───────────┘
+```
+
+**Pattern B — with the bundled Caddy edge (`--profile edge`).**
+
+```
+  browser ──HTTPS──▶ caddy :443
+                       · /api/*   ─▶ backend:8000
+                       · /health* ─▶ backend:8000
+                       · /*       ─▶ frontend:8080
+```
+
+Below either entry point:
+
+```
           ┌───────────────────┐         ┌────────────────────────┐
-          │ frontend          │         │ backend                │
-          │ nginx + static    │         │ uvicorn + FastAPI      │
+          │ frontend          │  /api   │ backend                │
+          │ nginx + static    │ ──────▶ │ uvicorn + FastAPI      │
           │ PWA build         │         │ migrations run on boot │
           └───────────────────┘         └───────────┬────────────┘
-                                                    ▼
+                                                    ▼  (no published port)
                                         ┌────────────────────────┐
                                         │ db — PostgreSQL 15     │
                                         │ named volume, no port  │
                                         └────────────────────────┘
 ```
+
+**The `/api` prefix is preserved end to end.** The backend mounts every route
+under `/api/v1`, so neither proxy strips it — Caddy uses `handle`, not
+`handle_path`, and nginx proxies `$request_uri` unchanged. Stripping it is how
+both patterns were once broken at the same time: the API answered 404 through
+Caddy and 200 text/html through nginx.
+
+The backend publishes **no host port** in either pattern, so an upstream proxy
+cannot reach it directly. Point your institutional proxy at `127.0.0.1:8080`
+and let the frontend route `/api` — that is the supported topology.
 
 | Component | Image | Notes |
 |---|---|---|
@@ -82,19 +111,53 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 Then:
 
 ```bash
-# Without the bundled TLS edge (your institution proxies to 127.0.0.1:8080):
+# Pattern A — your institution terminates TLS and proxies to 127.0.0.1:8080.
+# The frontend routes /api to the backend itself; nothing else to configure.
 docker compose -f docker-compose.prod.yml up -d --build
 
-# With it:
+# Pattern B — use the bundled Caddy edge (set CADDY_DOMAIN in .env first).
 docker compose -f docker-compose.prod.yml --profile edge up -d --build
 ```
+
+`TRUST_PROXY_HEADERS` is worth a moment here. `.env.example` ships it as
+`true`, which is correct for both patterns above: nginx and Caddy each
+overwrite `X-Forwarded-For` with the real peer before the backend sees it, so
+per-IP rate limiting counts the actual caller. The compose file defaults it to
+`false` when the variable is absent, because believing that header with nothing
+in front to overwrite it lets any caller pick their own rate-limit bucket. Set
+it to `false` if you put something else in front that does not overwrite the
+header — accepting that all callers then share one per-IP budget.
 
 ## 4. Verifying the deployment
 
 ```bash
-docker compose -f docker-compose.prod.yml ps          # all services healthy
-curl -fsS https://your-host/api/v1/../health          # liveness  -> {"status":"healthy"}
-curl -fsS https://your-host/health/ready              # readiness -> database ok
+docker compose -f docker-compose.prod.yml ps     # all services healthy
+
+# Liveness — is the process up? Touches nothing else.
+curl -fsS https://your-host/health
+# -> {"status":"healthy"}
+
+# Readiness — can it serve? Reports the database too.
+curl -fsS https://your-host/health/ready
+# -> {"status":"ready","checks":{"database":"ok"}}
+```
+
+**Check what comes back, not just the exit code.** Both paths are proxied to
+the backend; if either proxy is misconfigured they fall through to the SPA and
+return `200 text/html`, so `curl -fsS` exits 0 while proving nothing. That is
+exactly how a broken deployment once looked healthy. A one-line assertion that
+cannot be fooled:
+
+```bash
+curl -fsS https://your-host/health/ready | grep -q '"database":"ok"'   && echo OK || echo 'NOT READY — the check did not reach the backend'
+```
+
+The same applies to the API itself. This must print `application/json`, never
+`text/html`:
+
+```bash
+curl -s -o /dev/null -w '%{content_type}
+' https://your-host/api/v1/ledger/logs
 ```
 
 Then check by hand, because these are the things a green health check does not

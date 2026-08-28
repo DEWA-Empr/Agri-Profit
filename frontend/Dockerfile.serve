@@ -31,6 +31,22 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Unprivileged: nginx:alpine can run as non-root on a high port, and there is no
 # reason for a static file server to be root inside its own container.
+#
+# THE USER DIRECTIVE ALONE WAS NOT ENOUGH, and the gap was invisible until the
+# image was actually run. Stock nginx keeps its scratch space under
+# /var/cache/nginx and its pid at /var/run/nginx.pid, both root-owned in the
+# base image, and it creates the temp directories at startup rather than on
+# first use. So `USER nginx` produced
+#
+#   [emerg] mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)
+#
+# on every start, and the container crash-looped. Nothing caught it: the
+# healthcheck never got a chance to run, and no test or CI job had ever started
+# this image. Handing the user its own scratch space and pid file is the whole
+# fix; the application content under /usr/share/nginx/html stays root-owned and
+# read-only to the server, which is what it should be.
+RUN mkdir -p /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp              /var/cache/nginx/fastcgi_temp /var/cache/nginx/uwsgi_temp              /var/cache/nginx/scgi_temp  && chown -R nginx:nginx /var/cache/nginx  && touch /var/run/nginx.pid  && chown nginx:nginx /var/run/nginx.pid
+
 EXPOSE 8080
 USER nginx
 CMD ["nginx", "-g", "daemon off;"]

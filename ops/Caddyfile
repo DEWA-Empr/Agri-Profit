@@ -14,7 +14,15 @@
 	encode gzip
 
 	# API first — more specific path wins.
-	handle_path /api/* {
+	#
+	# `handle`, NOT `handle_path`. handle_path STRIPS the matched prefix, so
+	# /api/v1/ledger/logs reached the backend as /v1/ledger/logs — and the
+	# backend mounts every route under /api/v1 (main.py: include_router(...,
+	# prefix="/api/v1")). Every API call through this edge answered 404, which
+	# is to say the TLS deployment had never served a request. Verified by
+	# proxying to a backend that echoed the path it received; the CI smoke job
+	# now proves the whole chain end to end.
+	handle /api/* {
 		reverse_proxy backend:8000 {
 			# The backend reads this for per-IP rate limiting, which is why
 			# TRUST_PROXY_HEADERS may be enabled: this hop overwrites whatever
@@ -22,6 +30,13 @@
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
 		}
+	}
+
+	# Liveness and readiness live at the backend's application root, not under
+	# /api, so they need their own route ahead of the catch-all — otherwise
+	# they reach the frontend and answer with the SPA shell.
+	handle /health* {
+		reverse_proxy backend:8000
 	}
 
 	handle {

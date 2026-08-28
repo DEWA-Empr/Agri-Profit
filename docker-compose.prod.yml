@@ -55,10 +55,23 @@ services:
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS in .env}
-      # Only meaningful because a proxy sits in front and overwrites the header.
-      # With no proxy this must stay false or every per-IP rate limit can be
-      # bypassed by sending the header yourself.
-      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+      # DEFAULTS TO FALSE, and the operator opts in. Believing
+      # X-Forwarded-For when nothing in front is guaranteed to overwrite it
+      # lets any caller choose their own rate-limit bucket by sending the
+      # header, which silently disables every per-IP limit in the app. That is
+      # a bypass; the failure in the other direction is not.
+      #
+      # .env.example ships this as `true`, because both proxies in this
+      # repository (the frontend's nginx and the optional Caddy edge) now
+      # overwrite the header with the real peer, so a deployment that follows
+      # the documented setup can trust it. Read docs/OPERATIONS.md before
+      # enabling it behind anything else.
+      #
+      # NOTE the cost of leaving it false: with a proxy in front, every request
+      # reaches the backend from the proxy's address, so all callers share one
+      # per-IP budget. Per-ACCOUNT login limits are unaffected and remain the
+      # primary brute-force defence.
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       SHARE_LINK_DEFAULT_TTL_DAYS: ${SHARE_LINK_DEFAULT_TTL_DAYS:-90}
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
@@ -94,7 +107,13 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      # 127.0.0.1, NOT localhost. nginx listens on IPv4 only, and the base
+      # image's 10-listen-on-ipv6-by-default entrypoint script can no longer add
+      # an IPv6 listener because the container runs as an unprivileged user and
+      # cannot rewrite /etc/nginx/conf.d. `localhost` resolves to ::1 first, so
+      # the probe was refused and the container reported unhealthy forever while
+      # serving perfectly well on IPv4.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
