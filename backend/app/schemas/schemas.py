@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, model_validator, ValidationError
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, model_validator, ValidationError
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Optional, Any, Dict, List, Literal
@@ -307,6 +307,31 @@ class OperationalLogBase(BaseModel):
 
 class OperationalLogCreate(OperationalLogBase):
     financial_data: FinancialTransactionCreate
+
+    # THE ONE PLACE a crop name is normalised, mirroring the client's
+    # cropOptions.normaliseCrop (trim + lower case). There is no crop table and
+    # no crop enum — `crop` is free text — and every DSS grouping is an EXACT
+    # string match on this column, so "Maize", " maize" and "maize" were three
+    # crops on every panel: three rows, three marketable masses, three
+    # break-even prices, and a `?crop=maize` filter that 404s against a row
+    # written as "Maize". The entry form already normalises before sending;
+    # this makes the API enforce the contract rather than trust it, so a record
+    # from a seed script, a script or a direct API call groups with the rest.
+    #
+    # ON THE WRITE SCHEMA ONLY. OperationalLogBase is also the read model, and
+    # normalising there would return a legacy "Maize" row as "maize" while the
+    # aggregates still grouped it under "Maize" — hiding the very split this
+    # exists to stop. Rows written before this validator keep their spelling
+    # and need a one-off backfill to join their bucket.
+    #
+    # An all-whitespace crop becomes None (the Unspecified bucket) rather than
+    # an empty-string crop of its own.
+    @field_validator("crop")
+    @classmethod
+    def _normalise_crop(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return v.strip().lower() or None
 
     @model_validator(mode="after")
     def _validate_activity_payload(self) -> "OperationalLogCreate":

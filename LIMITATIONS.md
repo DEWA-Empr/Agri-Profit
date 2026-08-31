@@ -16,20 +16,48 @@ performance figures are from a **local Docker development environment** on a
 single developer machine and make no claim about production or real-network
 behaviour.
 
+**Baseline.** This document describes commit
+`78a68c292205acdcac1a52f977fbea31b6e8495e` on `main` (29 August 2026), the
+thesis baseline. Every figure and every open/closed judgement here traces to
+`docs/EVIDENCE_FREEZE_2026-08-29.md`, which supersedes the 25 August freeze.
+Where a limitation recorded in an earlier revision of this file has since been
+closed, or was found never to have been real, the entry is rewritten to describe
+the current state rather than deleted, so that a reader who meets the old text
+elsewhere can see what became of it.
+
 ---
 
 ## 1. Scope and Deployment
 
-**Local-only deployment.** The application runs as a Docker Compose stack
-(PostgreSQL, FastAPI backend, Vite/React frontend) on a single machine. It has
-never been deployed to a production host. Consequently there is no TLS
-termination, no managed database backup or point-in-time recovery, no horizontal
-scaling, no process supervision beyond Docker's restart policy, and no
-observability stack (metrics, tracing, alerting) beyond structured request
-logging to stdout. The signing-key guard (`core/config.py`) refuses to boot
-outside `dev`/`test` with the public default `SECRET_KEY`, which is the correct
-first step, but a real deployment would additionally require secret management,
-network hardening, and an operations runbook that this project does not provide.
+**No production deployment — but a production deployment path that has been
+exercised.** This entry previously recorded a blanket absence. That is no longer
+accurate, and the distinction now matters: a deployment *path* exists and has
+been built, started and probed; a *deployment* does not exist.
+
+Exercised at the baseline (`docs/EVIDENCE_FREEZE_2026-08-29.md` §3.7, §3.12,
+§3.13): `docker-compose.prod.yml` builds and starts with all three services
+healthy; the frontend is served by nginx and proxies the API with its path
+intact; migrations are applied on startup; liveness and readiness probes answer
+from the application rather than from the page shell; both application
+containers run unprivileged (backend uid 1000, frontend uid 101) and the
+database publishes no host port; the signing-key guard (`core/config.py`)
+refuses to boot outside `dev`/`test` with the public default `SECRET_KEY`, no
+`SECRET_KEY` literal is committed and no `.env` is tracked; an optional Caddy
+edge supplies automatic TLS under the `edge` profile and its configuration
+renders; and `ops/backup.sh` / `ops/restore.sh` were run end to end against a
+real PostgreSQL 15 server, restoring into a scratch database beside the live one
+with every row count matching and the paired-write invariant intact.
+
+What does **not** exist: no instance serves real users, no departmental host
+runs this software, no TLS certificate has ever been issued for a real domain
+(automatic issuance has never run against a real hostname), and there is **no
+production observability** — no metrics, no tracing, no alerting; container logs
+to stdout are the whole of it. There is no managed database service and no
+point-in-time recovery: what exists is a scripted dump and restore. The backup
+rehearsal verifies the mechanism against seeded data; it is not a restore of a
+production backup, and the standing requirement of a monthly rehearsal against
+real data is unaffected by it. Hosting cost is therefore estimated, not
+incurred.
 
 **Single-instance assumptions.** The offline-sync idempotency, the DSS
 train-on-boot step, and the in-process model cache all assume one backend
@@ -58,11 +86,21 @@ A user who forgets their password has no self-service path back into their
 account. This is a known gap, deferred deliberately to keep the identity surface
 small for the thesis.
 
-**No rate limiting or brute-force protection.** Neither the login endpoint nor
-any other route is throttled. An attacker can attempt unlimited credential
-guesses. Bcrypt's per-attempt cost raises the price of an online attack, but the
-absence of lockout, throttling, or CAPTCHA is a real weakness for any
-internet-facing deployment.
+**Login throttling exists; its counters are in-process.** This entry previously
+recorded the absence of any throttling. Authentication is now throttled
+(`core/rate_limit.py`, 19 tests): failed logins are counted on two independent
+budgets, per account and per client address; registration and the public report
+are separately capped; successes are not counted and clear the account budget;
+and the refusal names no account, so it confirms no email. Verified live at the
+baseline — ten failures returned 401 and the eleventh returned 429 carrying
+`Retry-After: 896`, on a budget of exactly 10 failures per 900 s.
+
+The **residual** limitation is the mechanism rather than its absence: the
+counters are held in process. They do not span replicas and do not survive a
+restart — both observed directly, a backend restart clearing the counters and
+the account signing in immediately. On a single-instance deployment that is
+acceptable; on a replicated one it is not, and a shared store would be required.
+There is still no CAPTCHA and no account lockout beyond the time budget.
 
 What the current design *does* get right, and what should be preserved in any
 hardening, is the **per-farm data boundary**: every domain query is scoped to the
@@ -71,6 +109,23 @@ than leaking existence. The pre-defense audit exercised this boundary across the
 ledger, reports, equipment, DSS, and share-link surfaces with a second account's
 token and found no cross-tenant access. Passwords are stored only as bcrypt
 (`$2b$`) hashes.
+
+**Authorization within a farm is role-based, and share links are bounded.**
+Neither was true when this document was first written, and both bear directly on
+the stakeholder-sharing objective. Three roles — owner, manager, worker — sit
+over a twelve-permission table (`core/roles.py`, 74 collected tests); endpoints
+ask for a permission rather than for a role; and permission is checked **before**
+scope, so a refusal never doubles as an existence oracle. Model retraining is
+granted to no role and is additionally disabled by configuration — an owner
+calling `POST /dss/train` receives 403. Share links expire (90 days, verified to
+the second), are revocable, are stored only as a hash, cannot be exchanged for a
+session, and resolve unknown, revoked and expired tokens to one identical 404.
+The raw token is scrubbed from all three logs that record the request: nginx
+writes a redaction, while the application middleware and uvicorn's access log
+write a stable non-reversible fingerprint that still correlates requests. What
+remains open is stated above and below — no revocation within a token's
+lifetime, no refresh, no reset, no second factor, and no independent security
+assessment of any of it.
 
 ## 3. Data Integrity and the Ledger Model
 
@@ -101,24 +156,31 @@ compensated by posting a new, unlinked manual entry in the opposite direction.
 The audit trail then shows the original, the erroneous reversal, and the
 compensating entry, which is truthful but not self-explanatory to a lay reader.
 
-**Numeric input validation is incomplete.** The schema validates enums, email
-format, password length, and the DSS model's input bounds, and no endpoint was
-observed to return a 500 on malformed input during the audit. However, monetary
-and quantity fields (`amount`, `purchase_price`, `cost`) are
-unconstrained floats (`depreciation_rate` is now bounded to 0 < rate <= 100): the audit confirmed that a negative amount and an
-absurdly large amount are currently accepted and persisted rather than rejected
-with a 422. Such values distort the P&L. Adding lower/upper bounds at the schema
-edge is a small, well-understood fix and is listed as near-term future work.
+**Monetary and quantity inputs are bounded — closed.** This entry previously
+recorded `amount`, `purchase_price` and `cost` as unconstrained floats through
+which a negative or absurdly large value could reach the P&L. They are now
+constrained at the schema edge by the `Money` and `Quantity` types (`ge=0`,
+`le=1e9` and `le=1e6` respectively, `allow_inf_nan=False`), covered by 32
+collected tests in `test_input_validation.py`, and confirmed live against the
+running production stack: −1,000,000, 2,000,000,000, `Infinity` and `NaN` are
+each refused with a renderable 422 rather than a server error, while a valid
+amount is accepted with 201. `depreciation_rate` remains bounded to
+0 < rate <= 100. The residual limitation is one of kind rather than of range: a
+bound rejects the impossible, not the merely wrong, so a plausible but mistaken
+amount is still accepted and must be corrected by reversal.
 
-**An equipment record cannot be corrected.** Equipment is create-and-read only:
-there is no PATCH or PUT on `/equipment/{id}` and no edit surface anywhere in
-the interface. A depreciation rate — or a purchase price or date — entered
-wrongly is permanent, and because the rate drives the depreciation overlay, the
-allocated fixed cost and both break-even prices, a mistyped rate silently biases
-every derived cost figure for that farm with no route to fix it short of direct
-database access. Unlike the ledger, where immutability is a deliberate design
-choice serviced by reversal, this is simply a missing write path: equipment is
-not a financial record and has no audit reason to be append-only.
+**An equipment record can now be corrected — closed.** This entry previously
+recorded equipment as create-and-read only, so that a mistyped depreciation rate
+silently biased the depreciation overlay, the allocated fixed cost and both
+break-even prices with no route to fix it short of database access.
+`PATCH /equipment/{id}` now exists (migration `b9e5f30c74a1`, 20 collected tests
+in `test_equipment_correction.py`): the update is partial and farm-scoped, an
+out-of-range rate is refused with 422, and the correction timestamp is stamped
+**only when a value actually changes**, so a no-op PATCH is not recorded as a
+correction. All three behaviours were confirmed live at the baseline. The
+distinction from the ledger is unchanged and deliberate: equipment is not a
+financial record, so it carries a correction timestamp rather than a contra
+entry.
 
 **Mechanisation records machine use but does not cost it.** A mechanisation log
 may carry `equipment_id` and `hours_used` alongside its `cost_subtype`. Only
@@ -135,16 +197,35 @@ Machine-hour costing is future work, and it needs a cited method before it needs
 code. `hours_used` is also optional on every write, so any rate built from
 today's data would be computed over an unknown fraction of actual machine use.
 
-**Per-crop decision support does not yet net reversals.** The farm-wide P&L and
-its top-line figures correctly subtract a reversal from the pile its category
-feeds (ticket 10b). The *per-crop* decision-support breakdown, and the investor
-report that reuses it, do **not** apply the same netting: because a reversal log
-carries no crop, the audit confirmed that after reversing a crop expense the
-original crop still shows the reversed cost while a phantom "Unspecified" cost
-appears. The overall figures remain correct; the per-crop comparison — the view a
-farmer would use to choose between crops — is misleading after any reversal. This
-is a correctness limitation of the present release, remedied by extending the
-reversal-aware aggregation into the per-crop service.
+**Per-crop decision support DOES net reversals — the entry that stood here was a
+false positive.** This section previously reported that the per-crop breakdown,
+and the investor report that reuses it, failed to net reversals and produced a
+phantom "Unspecified" bucket after a crop expense was reversed. That report was
+wrong at the commit it described. It is corrected here rather than deleted,
+because it was carried into several project documents and repeated in the thesis
+interpretation, and because the contrary text survives in the 25 August freeze
+as an immutable historical record.
+
+The behaviour was settled by execution rather than by reading code
+(`docs/EVIDENCE_FREEZE_2026-08-29.md` §2). Reversing a ₦25,000 crop expense
+moved that crop's expenses from ₦35,000 to ₦10,000 and its unit cost of
+production from ₦2,916.67 to ₦833.33, with no `Unspecified` bucket present
+before or after; the investor report, fetched unauthenticated with a live share
+token, returned the same netted figures. The reproduction was run **both** at the
+25 August freeze implementation commit (`59a6286`) and at the baseline
+(`78a68c2`) and returned identical results, so the capability predates the
+freeze: `6992d1c` (16 August 2026) introduced it, nine days before.
+`dss_service.py` attributes a contra to its original's crop
+(`crop = crop_by_id.get(log.reverses_id) or UNSPECIFIED`) and excludes reversed
+yield quantities from the unit-cost denominator. Five named tests pin the
+behaviour, including one asserting specifically that no `Unspecified` bucket
+appears, and the service stands at 100% statement coverage.
+
+The chronology to carry is therefore: reversal netting existed; the 25 August
+audit recorded a contrary finding that contradicted that same document's own
+"implemented and verified" table; adjudication on 29 August reproduced the
+behaviour and established that the per-crop figures net reversals; and the
+baseline **confirms** already-existing behaviour rather than fixing anything.
 
 ## 4. Decision Support System
 
@@ -239,41 +320,85 @@ grounded rather than aspirational.
 - **The entry bundle is still large, though no longer monolithic.** The
   production build was one ~245 KB-gzip chunk; every route is now `React.lazy`-
   loaded, and the two recharts-backed dashboard charts are lazy again inside
-  their page, which brings first paint down to a ~132 KB-gzip entry chunk with
-  the 82 KB charting code arriving separately and only where it is used. What
+  their page. Measured at the baseline: the entry chunk is 400.07 KB raw and
+  **130.03 KB gzipped**, with the 262.12 KB / 82.07 KB-gzip charting code
+  arriving separately and only where it is used, so a cold first load transfers
+  **139,245 bytes over 8 requests** against 243,724 over 7 before the split. What
   remains is the entry chunk itself (React, router, axios, Dexie), which no
   amount of route splitting reduces — trimming it further means removing or
   replacing a dependency, not deferring one.
+- **Performance figures were re-measured at the baseline** (29 August 2026,
+  commit `78a68c2`; raw artefacts in `docs/perf/2026-08-29/`), so they
+  characterise the submitted build. They remain **simulated (Lantern) throttling
+  against localhost on one developer machine** — a model of a degraded network,
+  not a measurement of a real one. Composite score and total blocking time are
+  **not comparable** between the 17 and 29 August sets, because the host
+  benchmark index differed (425–1654 against 1406–1996); only the network-bound
+  metrics and byte counts compare.
 - **No load, stress, or soak testing** was performed, and the test suite runs
   against SQLite while production uses PostgreSQL, so dialect-specific behaviour
   at scale is unverified (the reporting code deliberately avoids dialect-specific
-  date SQL to keep the two consistent).
+  date SQL to keep the two consistent). The one exception is the **migration
+  chain**, which is executed against a real PostgreSQL 15 server — 12 of 12
+  tests passing, including the schema-versus-models drift check and a
+  rollback-and-reapply of the newest revision. Concurrency behaviour remains
+  measured on SQLite and inferred for PostgreSQL.
 
 ## 8. Verification and Assurance
 
-Automated backend statement coverage is **93%** — 1,286 statements, 91 missed —
-across **190 backend tests**, alongside **89 frontend tests** in 9 files. Coverage
-is concentrated on the business logic: every service except `ledger_service`
-(98%) and `reports_service` (94%) is at 100%, as are the schemas, the models and
-five of the seven endpoint modules. Three modules sit below 80% and are the
-untested remainder: `ml/dataset.py` (36%), `ml/train.py` (42%) and
-`models/database.py` (64%) — the ML data-generation and training command-line
-paths, and engine construction. The figures are statement coverage, not branch
-coverage; `--cov-branch` is not used.
+At the baseline, automated backend statement coverage is **96%** — 1,594
+statements, 66 missed — across **422 collected backend cases** (418 passed, 4
+skipped locally, 0 failed), alongside **148 frontend tests** in 13 files at
+**43.18%** statement coverage. These figures supersede the 93% / 190 / 89 set
+recorded here previously, which was measured at the 25 August freeze; the
+increase is entirely additive — nine new backend modules and four new frontend
+files — and the four backend modules that existed at the freeze collect exactly
+the same 190 cases at the baseline, so no earlier verification was weakened.
+Test counts are pytest **collected** cases, not counts of `def test_`: six
+modules parameterise, so a function count understates them.
+
+Coverage remains concentrated on the business logic. Every module that serves a
+request is at or near 100%, including `dss_service`, `enterprise_service`,
+`bioprocess_service`, `share_service`, `equipment_service`, `core/roles`,
+`core/rate_limit`, `core/logging_safety`, the schemas and the models. The
+modules below 100% are `ml/train.py` (47%), `models/database.py` (64%),
+`ml/dataset.py` (82%), `api/endpoints/dss.py` (90%), `ml/predict.py` (91%),
+`core/security.py` (93%), `main.py` (94%), `services/reports_service.py` (94%),
+`services/auth_service.py` (98%) and `services/ledger_service.py` (98%) — the
+shortfall concentrated in the offline machine-learning command-line paths, which
+means the training pipeline is the least-verified part of the backend. The
+figures are statement coverage, not branch coverage; `--cov-branch` is not used.
+The frontend figure is low because the React page and form layer has no
+component tests at all; the logic modules are at or near 100%. Quote both
+numbers or neither.
+
+The frontend suite is **not timing-robust under machine contention**: run
+concurrently with the backend suite, one dashboard test exceeded the 5,000 ms
+default timeout; run alone the file passes in 2.93 s and the full suite passes
+148/148. That is contention against a default timeout rather than a defect, and
+it is recorded because it will recur on a loaded machine.
 
 There is no end-to-end browser-automation suite — offline behaviour and the
 service-worker cache lifecycle are verified by unit tests against stand-ins
 (a stand-in Cache Storage in `cacheInvalidation.test.tsx`, an in-memory Dexie
-table in `sync.test.ts`) and by API-level probing, not by a driven browser. There
-is no independent security penetration test beyond the internal audits.
+table in `sync.test.ts`), by API-level probing, and by a single driven-browser
+attribution probe, not by an automated browser suite. There is **no independent
+security review, penetration test or threat model**, and no load, stress or soak
+testing. A CI workflow is defined and its jobs' substance has been executed
+locally, but no CI run result is recorded for the baseline commit, so nothing in
+this project should be described as "CI is green".
 
 The read-only state audit of 25 August 2026 (`docs/STATE_REPORT_2026-08-25.md`)
 did find defects, and this section previously claimed otherwise. Two were
 cross-tenant or data-integrity issues and both are now fixed: the offline write
 queue was not identity-scoped (Section 5 above), and `client_id` uniqueness was
 global while idempotency was farm-scoped, so a cross-farm collision returned an
-unhandled HTTP 500 (Section 3 above). The absence of further findings is scoped
-to what the audit exercised and is not a substitute for external review.
+unhandled HTTP 500 (Section 3 above). That audit also produced one
+**false positive** — the per-crop reversal-netting finding adjudicated in
+Section 3 above — which is itself a limitation of the method: a defect read out
+of code without being reproduced is not a defect until it is reproduced. The
+absence of further findings is scoped to what the audit exercised and is not a
+substitute for external review.
 
 ---
 
@@ -285,41 +410,59 @@ second are larger capabilities that extend it.
 
 **Near-term hardening (small, well-scoped):**
 
-1. Constrain monetary and quantity inputs (`amount`, `purchase_price`,
-   `depreciation_rate`, `cost`) with non-negative and sane upper bounds at the
-   schema edge (§3).
-2. Extend reversal-aware netting into the per-crop decision-support and investor
-   aggregations, attributing a contra to its original's crop (§3).
-3. Scope or clear the offline write queue on authentication change (§5).
+Items 1 to 3 of this list are **done** at the baseline and are retained, struck
+through in substance, so that the programme reads as a record rather than as an
+outstanding list.
+
+1. ~~Constrain monetary and quantity inputs at the schema edge~~ — **done**
+   (`Money` / `Quantity`, 32 collected tests, live 422s; §3).
+2. ~~Extend reversal-aware netting into the per-crop decision-support and
+   investor aggregations~~ — **withdrawn: there was nothing to fix.** The
+   netting already existed and the finding that prompted this item was a false
+   positive (§3).
+3. ~~Scope or clear the offline write queue on authentication change~~ — **done**
+   (`lib/queueOwner`, compound `[ownerKey+status]` index, logout purge; §5).
 4. Eager-load the financial transaction in the ledger list and add an index on
-   `operational_logs.financial_transaction_id` (§7).
+   `operational_logs.financial_transaction_id` (§7). **Still open** — measured at
+   an earlier state and not re-measured at the baseline.
 5. Trim the frontend entry chunk itself — route-level code-splitting is done
    (§7), so the remaining win is dependency-level, not structural.
+6. Replace the in-process rate-limit counters with a shared store, so throttling
+   survives a restart and spans replicas (§2).
 
 **Medium-term platform maturity:**
 
-6. Identity hardening: refresh tokens with rotation, server-side revocation, a
-   password-reset flow, and login rate-limiting (§2).
-7. Cryptographic tamper-evidence for the ledger — an append-only, hash-chained
+7. Identity hardening: refresh tokens with rotation, server-side revocation and
+   a password-reset flow (§2). Login rate-limiting, which stood in this item, is
+   **done**.
+8. Cryptographic tamper-evidence for the ledger — an append-only, hash-chained
    audit log — to make "verifiable" a technical guarantee rather than a
    discipline, which is also the honest foundation for the blockchain-backed
    provenance ledger the PRD defers (§3).
-8. Per-identity partitioning of the offline read cache instead of wholesale purge
+9. Per-identity partitioning of the offline read cache instead of wholesale purge
    (§5), and broadening offline write support beyond the quick-log path.
-9. A production deployment story: managed hosting, TLS, database backup and
-   recovery, secret management, and observability (§1).
-10. An end-to-end browser test suite covering the offline/online transition and
-    the cache lifecycle, plus an independent security review (§8).
+10. **Perform** the deployment the path now supports: run the production
+    composition on a real host, issue a certificate for a real domain, and add
+    the observability that is genuinely absent — metrics, tracing and alerting
+    (§1). The composition, the TLS edge, the secret guards and the backup and
+    restore scripts exist and have been exercised; what remains is doing it for
+    real, plus a monthly restore rehearsal against real data.
+11. An end-to-end browser test suite covering the offline/online transition and
+    the cache lifecycle; an independent security review and penetration test;
+    load, stress and soak testing; and concurrency measured on PostgreSQL rather
+    than inferred from SQLite (§7, §8).
 
 **Longer-term capability (per the PRD's stated intent, not present scope):**
 
-11. Retrain the yield model on the farm's own accumulated records once enough
-    history exists, replacing the synthetic-data starting point (§4).
-12. External data integration — weather, soil and satellite feeds, and live
+12. Retrain the yield model on the farm's own accumulated records once enough
+    history exists, replacing the synthetic-data starting point (§4). The
+    pipeline itself is seed-deterministic and reproducible; what is missing is
+    real data, not procedural integrity.
+13. External data integration — weather, soil and satellite feeds, and live
     commodity pricing — to enrich decision support (§1, §4).
-13. Live low-end channels (USSD/SMS/WhatsApp) via a telecom aggregator (§6).
-14. Blockchain-backed supply-chain provenance, building on the hash-chained
-    ledger of item 7 (§3).
+14. Live low-end channels (USSD/SMS/WhatsApp) via a telecom aggregator (§6).
+15. Blockchain-backed supply-chain provenance, building on the hash-chained
+    ledger of item 8 (§3).
 
 Taken together, these items describe the distance between a focused thesis
 artifact that demonstrably works within its scope and a system ready for

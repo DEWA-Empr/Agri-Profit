@@ -69,3 +69,6 @@ AgriProfit-standalone.html
 # Local DB backup taken before the auth migration (do not commit)
 backup_pre_auth_migration.sql
 backup_pre_share_migration.sql
+
+# Another tool's config directory (empty placeholder files)
+.gemini/

@@ -36,10 +36,15 @@ describe('buildCropOptions', () => {
     expect(buildCropOptions([' Maize ', 'MAIZE'], ['maize'])).toEqual(['maize'])
   })
 
-  it('drops the null crop rather than offering "Unspecified" as a crop', () => {
-    // decision-support returns a null-crop bucket; it is a filing category, not
-    // something a farmer grows.
-    expect(buildCropOptions([null, undefined, '', '   '], [])).toEqual([])
+  it('drops the no-crop filing bucket rather than offering it as a crop', () => {
+    // decision-support NEVER returns a null crop: a log with no crop comes back
+    // under the literal string 'Unspecified' (dss_service.UNSPECIFIED). The
+    // guard used to test for null only, so the bucket normalised to
+    // 'unspecified' and reached the selector — and a farmer who picked it filed
+    // a real crop by that name, sitting as a second row beside the bucket on
+    // every DSS panel. It is a filing category, not something a farmer grows.
+    expect(buildCropOptions(['Unspecified', 'maize'], [])).toEqual(['maize'])
+    expect(buildCropOptions([null, undefined, '', '   ', 'UNSPECIFIED'], [])).toEqual([])
   })
 
   it('falls back to whichever source survived when the other request failed', () => {

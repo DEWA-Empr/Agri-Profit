@@ -28,6 +28,10 @@ from . import enterprise_service, reports_service
 
 UNSPECIFIED = "Unspecified"
 
+# The one bioprocess payload that carries a marketable outlet mass
+# (schemas.DryingParams.process_type is Literal["DRYING"]).
+DRYING = "DRYING"
+
 
 def get_decision_support(db: Session, farm_id: int) -> dict:
     """Compute per-crop unit cost of production and gross margin from the ledger.
@@ -127,8 +131,20 @@ def get_decision_support(db: Session, farm_id: int) -> dict:
             and log.id not in reversed_ids
             and log.extra_data
         ):
+            # Only a DRYING payload carries a marketable outlet mass, and
+            # only a number is a mass. `extra_data` is an unvalidated JSON
+            # column read straight off the row here — the Literal["DRYING"] on
+            # DryingParams guards the WRITE path and nothing guards this one,
+            # so a row inserted by a script, a seed or a future non-drying
+            # bioprocess payload would otherwise be summed into marketable
+            # mass, or blow up the whole report with a ValueError on float().
+            # Unrecognised shapes are skipped.
             mass_out = log.extra_data.get("mass_out_kg")
-            if mass_out is not None:
+            if (
+                log.extra_data.get("process_type") == DRYING
+                and isinstance(mass_out, (int, float))
+                and not isinstance(mass_out, bool)
+            ):
                 marketable[crop] = marketable.get(crop, 0.0) + float(mass_out)
 
     crops = []
@@ -365,8 +381,13 @@ def _enterprise_base(rows) -> dict:
             b["revenue_ngn"] += amount
 
         if log.activity_type == Category.BIOPROCESS and log.extra_data:
+            # Same guard, same reason, as get_decision_support above.
             mass_out = log.extra_data.get("mass_out_kg")
-            if mass_out is not None:
+            if (
+                log.extra_data.get("process_type") == DRYING
+                and isinstance(mass_out, (int, float))
+                and not isinstance(mass_out, bool)
+            ):
                 b["marketable_mass_kg"] = (b["marketable_mass_kg"] or 0.0) + float(mass_out)
 
         if log.activity_type == Category.YIELD and log.quantity:

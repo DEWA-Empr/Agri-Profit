@@ -1,5 +1,26 @@
 # Frontend performance measurements — raw Lighthouse artifacts
 
+> ## SUPERSEDED — 29 August 2026
+>
+> **The figures in this file characterise commit `c16924e`, measured 17 August
+> 2026, on a build that predates route-level code-splitting. They are no longer
+> the reported set.**
+>
+> The audit was re-run against the thesis baseline
+> `78a68c292205acdcac1a52f977fbea31b6e8495e` on 29 August 2026, by the same
+> method on the same machine. **The current set, and the one Chapter Four
+> reports, is in [`2026-08-29/`](./2026-08-29/)** with its own README.
+>
+> Headline movement (comparable metrics only — score and TBT are not comparable
+> across dates because host speed differed): cold transfer 243,724 B → 139,245 B;
+> cold slow-3G FCP 7674.4 ms → 5661.2 ms; cold slow-4G FCP 2317.7 ms →
+> 1709.9 ms; warm FCP 116.4 ms → 70.6 ms; warm LCP 1613.8 ms → 1612.0 ms
+> (unchanged).
+>
+> This file is left otherwise **unedited**, as the dated record of the earlier
+> measurement. Quote it only with its date and commit, and only as the earlier
+> build.
+
 This folder holds the **raw, unedited** Lighthouse output behind the frontend
 performance figures reported in the dissertation (LIMITATIONS §7). It is
 committed so that every number in the write-up can be traced back to the report

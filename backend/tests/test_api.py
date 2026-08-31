@@ -2257,3 +2257,82 @@ def test_enterprise_yield_baseline_reports_a_crop_with_no_yield(client):
     assert maize["olympic_average_kg"] is None
     assert maize["grand_average_kg"] is None
     assert "No yield" in maize["reason"]
+
+
+# --- Crop normalisation and unvalidated extra_data (crop taxonomy hardening) --
+#
+# `OperationalLog.crop` is free text and every DSS grouping is an EXACT string
+# match on it, so casing and stray whitespace used to split one crop into
+# several rows — each with its own marketable mass and break-even price. The
+# entry form normalises (cropOptions.normaliseCrop); OperationalLogCreate now
+# enforces the same rule at the API edge so a script, a seed or a direct call
+# groups with the rest.
+
+
+def test_crop_casing_and_whitespace_group_as_one_crop(client):
+    # Two drying runs filed as "Maize" and "  MAIZE  " are ONE maize row of
+    # 168 kg, not two rows of 84. Before the write-edge normalisation these
+    # were three distinct crops as far as every panel was concerned.
+    assert _post_drying(client, crop="Maize").status_code == 201
+    assert _post_drying(client, crop="  MAIZE  ").status_code == 201
+
+    crops = _dss_crops(client)
+    assert set(crops) == {"maize"}
+    assert crops["maize"]["marketable_mass_kg"] == pytest.approx(168.0)
+
+
+def test_crop_filter_matches_a_record_written_in_another_casing(client):
+    # The `?crop=` filter is an exact match and raises 404 on a miss, so a
+    # record written as "Maize" used to be unreachable by the normalised name
+    # the client sends.
+    _post_drying(client, crop="Maize", amount=4200.0)
+
+    r = client.get("/api/v1/dss/break-even-price", params={"crop": "maize"})
+    assert r.status_code == 200, r.text
+    assert r.json()["crops"][0]["marketable_mass_kg"] == pytest.approx(84.0)
+
+
+def test_whitespace_only_crop_files_under_unspecified_not_its_own_bucket(client):
+    # "   " is not a crop name. It becomes None (the Unspecified bucket) rather
+    # than an empty-string crop sitting beside it.
+    r = _post_crop_log(
+        client, activity_type="fertilizer", crop="   ",
+        amount=5000.0, transaction_type="debit",
+    )
+    assert r.status_code == 201
+    assert r.json()["crop"] is None
+    assert set(_dss_crops(client)) == {"Unspecified"}
+
+
+def test_non_drying_bioprocess_row_contributes_no_marketable_mass(client, db):
+    # `extra_data` is unvalidated JSON when read back off the row: the
+    # Literal["DRYING"] on DryingParams guards the write path only. A bioprocess
+    # row carrying some other process_type — a script, a seed, a future storage
+    # or milling payload — must not be summed into marketable mass, and a
+    # non-numeric mass must not take the whole report down with a ValueError.
+    from backend.app.core.enums import Category
+    from backend.app.models import models
+
+    farm_id = db.query(models.User).first().farm_id
+    tx = models.FinancialTransaction(
+        farm_id=farm_id, amount=1000.0, transaction_type="debit", category="bioprocess"
+    )
+    db.add(tx)
+    db.flush()
+    for extra in (
+        {"process_type": "STORAGE", "mass_out_kg": 84.0},   # not a drying run
+        {"process_type": "DRYING", "mass_out_kg": "eighty"},  # not a number
+    ):
+        db.add(models.OperationalLog(
+            farm_id=farm_id, activity_type=Category.BIOPROCESS, crop="maize",
+            extra_data=extra, financial_transaction_id=tx.id,
+        ))
+    db.commit()
+
+    assert client.get("/api/v1/dss/decision-support").status_code == 200
+    assert _dss_crops(client)["maize"]["marketable_mass_kg"] is None
+
+    be = client.get("/api/v1/dss/break-even-price").json()
+    maize = {c["crop"]: c for c in be["crops"]}["maize"]
+    assert maize["marketable_mass_kg"] is None
+    assert maize["break_even_price_cash_ngn_per_kg"] is None

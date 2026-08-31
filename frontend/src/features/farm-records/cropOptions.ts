@@ -29,6 +29,14 @@
 
 export const normaliseCrop = (crop: string): string => crop.trim().toLowerCase();
 
+// The DSS's own name for the no-crop filing bucket (dss_service.UNSPECIFIED),
+// normalised. /dss/decision-support never returns a null crop — a log with no
+// crop comes back under the literal string "Unspecified" — so filtering on null
+// alone let that bucket through as a selectable option. A farmer who picked it
+// filed a record under a REAL crop named "unspecified", which then sat as a
+// second row beside the genuine bucket on every panel.
+const UNSPECIFIED_BUCKET = 'unspecified';
+
 /**
  * Merge the farm's recorded crops with the predictor's, normalised, deduped and
  * sorted. Either input may be missing — a failed fetch degrades to the other
@@ -40,9 +48,10 @@ export function buildCropOptions(
 ): string[] {
   const seen = new Set<string>();
   for (const raw of [...recorded, ...predictor]) {
-    if (raw == null) continue;            // the "Unspecified" bucket is not a crop
+    if (raw == null) continue;
     const crop = normaliseCrop(raw);
-    if (crop === '') continue;
+    // Neither an empty name nor the no-crop filing bucket is something grown.
+    if (crop === '' || crop === UNSPECIFIED_BUCKET) continue;
     seen.add(crop);
   }
   return [...seen].sort((a, b) => a.localeCompare(b));
