@@ -19,6 +19,9 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
   const [pendingReversal, setPendingReversal] = useState<OperationalLog | null>(null);
   const [reversing, setReversing] = useState(false);
   const [reverseError, setReverseError] = useState('');
+  // Filters. Empty string means "no filter" for both.
+  const [cropFilter, setCropFilter] = useState('');
+  const [activityFilter, setActivityFilter] = useState('');
 
   const fetchLogs = () => {
     ledgerService.getLogs()
@@ -40,10 +43,19 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
   // relation here: any id that some other row points at has been reversed.
   //
   // CAVEAT: this is only as complete as the page we fetched. GET /ledger/logs
-  // defaults to limit=100 with no ORDER BY, so past 100 records a reversal can
-  // fall outside the response and leave its original looking eligible. The
-  // eligibility test below is therefore a UX affordance, not a guarantee — the
-  // 409 handler in handleConfirm is what actually keeps us honest.
+  // defaults to limit=100, so past 100 records a reversal can fall outside the
+  // response and leave its original looking eligible. The eligibility test
+  // below is therefore a UX affordance, not a guarantee — the 409 handler in
+  // handleConfirm is what actually keeps us honest.
+  //
+  // The FILTERS BELOW WIDEN THAT GAP, and deliberately so. reversedIds is built
+  // from every fetched log, not from the filtered view, so filtering does not
+  // hide a "Reversed" pill. But a crop filter still narrows what a reader can
+  // SEE: reverse_log carries no crop onto the correcting entry (so a reversal
+  // cannot distort per-crop yield analytics), which means a reversal never
+  // matches a crop filter. Filter to one crop and the reversed original shows
+  // its pill with its correction nowhere on screen. The money is right; the
+  // audit trail is half-visible. Same 409 backstop, same honesty about it.
   const reversedIds = useMemo(
     () => new Set(logs.map((l) => l.reverses_id).filter((id): id is number => id != null)),
     [logs],
@@ -51,6 +63,35 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
 
   const canReverse = (log: OperationalLog) =>
     log.reverses_id == null && !reversedIds.has(log.id);
+
+  // Filter options come from the records themselves rather than from a literal.
+  // The form's own crop list is assembled from the API (see ./cropOptions) and
+  // its category list is a literal beside the form; duplicating either here
+  // would be a third list to drift. What the farm has actually filed is both
+  // the honest set and the only one that can never offer an option that matches
+  // nothing.
+  const cropChoices = useMemo(
+    () => [...new Set(logs.map((l) => l.crop).filter((c): c is string => !!c))].sort(),
+    [logs],
+  );
+  const activityChoices = useMemo(
+    () => [...new Set(logs.map((l) => l.activity_type))].sort(),
+    [logs],
+  );
+
+  // The filtered view. Applied on the client over the whole fetched set, which
+  // is sound HERE because every farm's ledger is well inside the limit=100 the
+  // read returns — the largest is 34 records. If a farm ever crosses that, this
+  // becomes a filter over a truncated set and would under-report matches
+  // silently; the filter would have to move into the query at that point.
+  const visibleLogs = useMemo(
+    () => logs.filter((l) =>
+      (!cropFilter || l.crop === cropFilter)
+      && (!activityFilter || l.activity_type === activityFilter)),
+    [logs, cropFilter, activityFilter],
+  );
+
+  const filtering = cropFilter !== '' || activityFilter !== '';
 
   const handleConfirm = async () => {
     if (!pendingReversal) return;
@@ -90,10 +131,52 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
   const td: CSSProperties = { fontSize: '12px', color: colors.textBody, padding: '11px 12px', borderBottom: `0.5px solid ${colors.dividerLight}` };
   const pill: CSSProperties = { display: 'inline-block', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em', padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' };
   const card: CSSProperties = { background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, overflow: 'hidden' };
+  const filterLabel: CSSProperties = { fontSize: '11px', fontWeight: 600, color: colors.labelText };
+  const filterField: CSSProperties = { padding: '6px 9px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '11.5px', background: colors.surface, color: colors.textBody, textTransform: 'capitalize' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+        {/* Filters appear only once there is something to filter. */}
+        {logs.length > 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <label htmlFor="fr-activity" style={filterLabel}>Activity</label>
+            <select
+              id="fr-activity"
+              value={activityFilter}
+              onChange={(e) => setActivityFilter(e.target.value)}
+              style={filterField}
+            >
+              <option value="">All</option>
+              {activityChoices.map((a) => (
+                <option key={a} value={a} style={{ textTransform: 'capitalize' }}>{a}</option>
+              ))}
+            </select>
+            <label htmlFor="fr-crop" style={filterLabel}>Crop</label>
+            <select
+              id="fr-crop"
+              value={cropFilter}
+              onChange={(e) => setCropFilter(e.target.value)}
+              style={filterField}
+            >
+              <option value="">All</option>
+              {cropChoices.map((c) => (
+                <option key={c} value={c} style={{ textTransform: 'capitalize' }}>{c}</option>
+              ))}
+            </select>
+            {filtering && (
+              <button
+                onClick={() => { setCropFilter(''); setActivityFilter(''); }}
+                style={{ background: 'transparent', border: `0.5px solid ${colors.borderInput}`, borderRadius: '7px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, color: colors.textBody, cursor: 'pointer' }}
+              >
+                Clear
+              </button>
+            )}
+            <span style={{ fontSize: '11px', color: colors.textMuted }}>
+              {filtering ? `${visibleLogs.length} of ${logs.length} records` : `${logs.length} record${logs.length === 1 ? '' : 's'}`}
+            </span>
+          </div>
+        ) : <span />}
         <button
           onClick={() => setShowForm((s) => !s)}
           style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.primaryDark, color: colors.onPrimary, padding: '8px 14px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
@@ -124,6 +207,21 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
         <div style={card}>
           <p style={{ padding: '24px', fontSize: '12px', color: colors.textMuted }}>Loading records…</p>
         </div>
+      ) : logs.length > 0 && visibleLogs.length === 0 ? (
+        // Filtered down to nothing. Deliberately NOT the EmptyState: the ledger
+        // is not empty and "log your first activity" would be false.
+        <div style={card}>
+          <p style={{ padding: '24px', fontSize: '12px', color: colors.textMuted }}>
+            No records match this filter.{' '}
+            <button
+              onClick={() => { setCropFilter(''); setActivityFilter(''); }}
+              style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: colors.primaryDark, fontWeight: 600, cursor: 'pointer' }}
+            >
+              Clear the filter
+            </button>{' '}
+            to see all {logs.length} records.
+          </p>
+        </div>
       ) : logs.length > 0 ? (
         <div style={card}>
           <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -140,7 +238,7 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
               </tr>
             </thead>
             <tbody>
-              {logs.map((log) => {
+              {visibleLogs.map((log) => {
                 const ft = log.financial_transaction;
                 const isCredit = ft?.transaction_type === 'credit';
                 const isReversal = log.reverses_id != null;
