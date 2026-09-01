@@ -130,6 +130,7 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
             <thead>
               <tr>
                 <th style={th}>Activity</th>
+                <th style={th}>Crop</th>
                 <th style={th}>Description</th>
                 <th style={th}>Quantity</th>
                 <th style={th}>Amount (₦)</th>
@@ -147,6 +148,12 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
                 return (
                   <tr key={log.id} style={{ background: isReversal ? 'rgba(160,92,0,0.04)' : undefined }}>
                     <td style={{ ...td, fontWeight: 600, textTransform: 'capitalize', color: wasReversed ? colors.textMuted : undefined }}>{log.activity_type}</td>
+                    {/* Stored normalised to lower case (schemas._normalise_crop), so
+                        capitalize here rather than trusting what was typed. Nullable
+                        column: an em-dash, not a blank cell, when there is no crop —
+                        which is also every reversal entry (reverse_log deliberately
+                        carries no crop). */}
+                    <td style={{ ...td, textTransform: 'capitalize', color: wasReversed ? colors.textMuted : undefined }}>{log.crop || '—'}</td>
                     <td style={{ ...td, color: wasReversed ? colors.textMuted : undefined }}>{log.description || '—'}</td>
                     <td style={td}>{log.quantity != null ? `${log.quantity} ${log.unit || ''}`.trim() : '—'}</td>
                     <td style={{
