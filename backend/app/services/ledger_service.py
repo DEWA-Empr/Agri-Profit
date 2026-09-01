@@ -153,10 +153,25 @@ def reverse_log(db: Session, farm_id: int, log_id: int):
     return reversal_log
 
 
+# Newest first, and TOTALLY ordered. A paged read without an ORDER BY returns
+# rows in an implementation-defined order, so the records list had no defined
+# sort at all: the Date column read as unsorted and a just-saved record could
+# appear anywhere in the table.
+#
+# The `id` tiebreak is not decoration. `timestamp` is a server_default of now(),
+# so rows written in one transaction or one clock tick share a value; ordering on
+# timestamp alone would leave those in an undefined relative order and reproduce
+# the same defect in miniature. `id` is monotonic and unique, which makes the
+# pair a total order.
+#
+# This changes no derived figure. Neither function feeds a report: the P&L, the
+# decision support and the enterprise economics each build their own unbounded
+# query (reports_service, dss_service) and never call these.
 def get_operational_logs(db: Session, farm_id: int, skip: int = 0, limit: int = 100):
     return (
         db.query(models.OperationalLog)
         .filter(models.OperationalLog.farm_id == farm_id)
+        .order_by(models.OperationalLog.timestamp.desc(), models.OperationalLog.id.desc())
         .offset(skip)
         .limit(limit)
         .all()
@@ -166,6 +181,7 @@ def get_financial_transactions(db: Session, farm_id: int, skip: int = 0, limit: 
     return (
         db.query(models.FinancialTransaction)
         .filter(models.FinancialTransaction.farm_id == farm_id)
+        .order_by(models.FinancialTransaction.timestamp.desc(), models.FinancialTransaction.id.desc())
         .offset(skip)
         .limit(limit)
         .all()
