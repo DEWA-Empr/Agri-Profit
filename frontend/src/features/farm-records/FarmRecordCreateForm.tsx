@@ -40,6 +40,32 @@ const OTHER_CROP = '__other__';
 // with; only new entries are constrained.
 const UNITS = ['kg', 'tonnes', 'bags', 'crates'];
 
+// Mechanisation cost classification. Mirrors the backend's Literal on
+// MechanizationParams.cost_subtype (schemas.py) — these five strings are the
+// keys COST_BEHAVIOUR is looked up by, so each one decides whether the row's
+// money lands in the variable, semi-variable or fixed bucket, and therefore
+// every cost-structure, break-even and sensitivity figure downstream.
+//
+// Without this control the form sent no extra_data at all on a mechanisation
+// log, so cost_behaviour_for missed the lookup and EVERY mechanisation cost
+// entered through the app landed in the unclassified pile — a ledger entered
+// entirely through the UI reported 0% classification coverage.
+//
+// OPTIONAL, deliberately: the backend accepts a mechanisation log with no
+// extra_data (it is what every legacy row looks like), so leaving this unset
+// must stay legal. See the guard in handleSubmit.
+//
+// equipment_id and hours_used are NOT offered. They are capture-only fields
+// with no consumer, settled in docs/adr/0003 — adding UI for them would widen
+// the form without moving any figure.
+const COST_SUBTYPES: { value: string; label: string }[] = [
+  { value: 'FUEL', label: 'Fuel' },
+  { value: 'LUBRICANTS', label: 'Lubricants' },
+  { value: 'REPAIRS', label: 'Repairs' },
+  { value: 'MACHINERY_HIRE', label: 'Machinery hire' },
+  { value: 'DEPRECIATION', label: 'Depreciation' },
+];
+
 // Sales/income default to a credit; everything else is a cost (debit).
 const defaultTxType = (c: Category): TransactionType => (c === 'yield' ? 'credit' : 'debit');
 
@@ -62,6 +88,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
     transaction_type: 'credit' as TransactionType,
     amount: '',
     tax_category: '',
+    cost_subtype: '',
   });
   const [drying, setDrying] = useState<DryingForm>(emptyDryingForm);
   const [saving, setSaving] = useState(false);
@@ -79,6 +106,7 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
   const { crops: cropOptions, loading: cropsLoading } = useCropOptions();
 
   const isDrying = form.activity_type === 'bioprocess';
+  const isMechanization = form.activity_type === 'mechanization';
   const isOtherCrop = form.crop === OTHER_CROP;
   // Normalised at the edge so "Maize", " maize" and "maize" are one crop. Crop
   // grouping in the DSS is an exact string match on this column.
@@ -86,7 +114,16 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
 
   const setActivity = (value: Category) =>
     // Re-default the debit/credit choice to match the new activity (still overridable).
-    setForm((f) => ({ ...f, activity_type: value, transaction_type: defaultTxType(value) }));
+    // The cost subtype is dropped whenever the activity moves away from
+    // mechanisation: it classifies a mechanisation cost and means nothing on a
+    // seed or labour row, so a stale value must not survive the switch and ride
+    // along in extra_data.
+    setForm((f) => ({
+      ...f,
+      activity_type: value,
+      transaction_type: defaultTxType(value),
+      cost_subtype: value === 'mechanization' ? f.cost_subtype : '',
+    }));
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -109,6 +146,15 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
         return;
       }
       extraData = { ...built.params };
+    } else if (isMechanization && form.cost_subtype) {
+      // THE `form.cost_subtype` GUARD IS LOAD-BEARING. MechanizationParams
+      // requires cost_subtype, so `{cost_subtype: ''}` is a 422 — and
+      // saveOperationalLog cannot tell a 422 from a network failure, so it
+      // would queue the record in IndexedDB where it would re-fail on every
+      // flush until its retries ran out (the same trap documented above the
+      // CATEGORIES list). An unset subtype must send NO extra_data at all,
+      // which the backend accepts and classifies as None.
+      extraData = { cost_subtype: form.cost_subtype };
     }
 
     setSaving(true);
@@ -231,6 +277,21 @@ export const FarmRecordCreateForm = ({ isOnline, onSaved, onClose }: Props) => {
       </div>
 
       {isDrying && <DryingFields value={drying} onChange={setDrying} label={label} field={field} />}
+
+      {isMechanization && (
+        <div>
+          <label style={label}>
+            Cost type <span style={{ color: colors.textFaint, fontWeight: 400 }}>(optional — classifies this cost)</span>
+          </label>
+          <select value={form.cost_subtype} onChange={(e) => setForm({ ...form, cost_subtype: e.target.value })} style={field}>
+            <option value="">Not classified</option>
+            {COST_SUBTYPES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          <p style={{ fontSize: '10.5px', color: colors.textFaint, margin: '4px 0 0' }}>
+            Classifying a mechanisation cost puts it in the right bucket on your cost structure and break-even price. Left unset, it is reported as unclassified.
+          </p>
+        </div>
+      )}
 
       <div>
         <label style={label}>Tax category <span style={{ color: colors.textFaint, fontWeight: 400 }}>(optional)</span></label>
