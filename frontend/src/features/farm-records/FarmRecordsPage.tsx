@@ -89,6 +89,7 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
   const th: CSSProperties = { textAlign: 'left', fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em', color: colors.textMuted, textTransform: 'uppercase', padding: '10px 12px', borderBottom: `0.5px solid ${colors.border}` };
   const td: CSSProperties = { fontSize: '12px', color: colors.textBody, padding: '11px 12px', borderBottom: `0.5px solid ${colors.dividerLight}` };
   const pill: CSSProperties = { display: 'inline-block', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em', padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap' };
+  const card: CSSProperties = { background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, overflow: 'hidden' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -111,27 +112,20 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
         </div>
       )}
 
-      {!loading && logs.length === 0 && !showForm ? (
-        <EmptyState
-          icon={<ClipboardList size={26} color={colors.primary} />}
-          title="No records yet"
-          description="Log your first activity — a planting, an input purchase or a sale — and it will flow into your profit, costs and reports."
-          action={
-            <button
-              onClick={() => setShowForm(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.primaryDark, color: colors.onPrimary, padding: '10px 16px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
-            >
-              <Plus size={16} /> Log your first activity
-            </button>
-          }
-        />
-      ) : (
-      <div style={{ background: colors.surface, borderRadius: '12px', border: `0.5px solid ${colors.border}`, overflow: 'hidden' }}>
-        {loading ? (
+      {/* Three mutually exclusive states, in priority order:
+            1. loading            — the first fetch has not resolved
+            2. logs.length > 0    — the record table
+            3. !showForm          — the empty state, with its call to action
+          and nothing at all when the ledger is empty AND the create form is
+          open: the form is the whole content then, and printing "no records
+          yet" underneath it told the user something they were already busy
+          fixing. */}
+      {loading ? (
+        <div style={card}>
           <p style={{ padding: '24px', fontSize: '12px', color: colors.textMuted }}>Loading records…</p>
-        ) : logs.length === 0 ? (
-          <p style={{ padding: '24px', fontSize: '12px', color: colors.textMuted }}>No records yet. Use “Log activity” to add your first record.</p>
-        ) : (
+        </div>
+      ) : logs.length > 0 ? (
+        <div style={card}>
           <div className="table-scroll"><table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -198,9 +192,22 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
               })}
             </tbody>
           </table></div>
-        )}
-      </div>
-      )}
+        </div>
+      ) : !showForm ? (
+        <EmptyState
+          icon={<ClipboardList size={26} color={colors.primary} />}
+          title="No records yet"
+          description="Log your first activity — a planting, an input purchase or a sale — and it will flow into your profit, costs and reports."
+          action={
+            <button
+              onClick={() => setShowForm(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', background: colors.primaryDark, color: colors.onPrimary, padding: '10px 16px', borderRadius: '8px', border: 'none', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Plus size={16} /> Log your first activity
+            </button>
+          }
+        />
+      ) : null}
 
       {pendingReversal && (
         <ReverseConfirmDialog
