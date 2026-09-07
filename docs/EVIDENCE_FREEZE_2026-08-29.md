@@ -29,6 +29,17 @@ a thesis that contradicts itself.
 
 ## 1. Repository identity
 
+> **SUPERSEDED IN PART — 7 September 2026.** The reporting baseline for the test
+> figures, for the thirteen screenshots in `Screenshots/` and for all frontend
+> behaviour is now commit **`598eab0`**
+> (`598eab0a02533e9692332d92382d42f16fc9e346`), recorded in
+> `docs/EVIDENCE_FREEZE_2026-09-07.md`. The screenshots were captured against
+> that state and do **not** reproduce from the commit named in this section.
+> The **performance figures in this document remain measured at `78a68c2` and
+> were not re-measured on 7 September** — they stand as recorded here and
+> should still be cited to `78a68c2`. Everything this document records that the
+> 7 September freeze does not name also still stands.
+
 | | |
 | --- | --- |
 | Branch | `main` |

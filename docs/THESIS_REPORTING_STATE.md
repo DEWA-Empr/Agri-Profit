@@ -387,6 +387,16 @@ screenshot, figure, table and measured result must come from `78a68c2`, with the
 live database in the condition described in the 29 Aug freeze §4, signed in as
 **farm 26**.
 
+> **SUPERSEDED IN PART — 7 September 2026.** The reporting baseline for test
+> figures, for the thirteen screenshots in `Screenshots/` and for all frontend
+> behaviour is now commit **`598eab0`**
+> (`598eab0a02533e9692332d92382d42f16fc9e346`), recorded in
+> `docs/EVIDENCE_FREEZE_2026-09-07.md`. The screenshots were captured against
+> that state and do **not** reproduce from `78a68c2`. The **performance figures
+> remain at `78a68c2` and were not re-measured**; cite `78a68c2` for those and
+> `598eab0` for everything else. The database condition and the farm 26 sign-in
+> above are unchanged.
+
 Reproduce with:
 
 ```
