@@ -43,7 +43,10 @@ const SafeStorageChip = ({ safe, threshold }: { safe?: boolean | null; threshold
   );
 };
 
-export const DryingRunResult = ({ logId, onDone }: { logId: number; onDone: () => void }) => {
+// `title` lets the same panel serve two callers: the create form, which has
+// just saved the run, and the records table, which is only browsing one. It
+// defaults to the post-save wording so the create path is unchanged.
+export const DryingRunResult = ({ logId, onDone, title = 'Drying run saved' }: { logId: number; onDone: () => void; title?: string }) => {
   const [detail, setDetail] = useState<BioprocessDetail | null>(null);
   const [error, setError] = useState('');
 
@@ -79,7 +82,7 @@ export const DryingRunResult = ({ logId, onDone }: { logId: number; onDone: () =
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <Droplets size={16} color={colors.primaryDark} />
         <h3 style={{ fontSize: '13px', fontWeight: 700, color: colors.textStrong, margin: 0 }}>
-          Drying run saved{detail.crop ? ` — ${detail.crop}` : ''}
+          {title}{detail.crop ? ` — ${detail.crop}` : ''}
         </h3>
       </div>
 
@@ -109,7 +112,7 @@ export const DryingRunResult = ({ logId, onDone }: { logId: number; onDone: () =
           readings the only points are the run's start and end, and joining two
           points would draw a straight line that asserts a linear fall nobody
           measured — so the panel says what is missing instead of drawing it.
-          Same rule as the Page fit hint below. */}
+          Same rule as the Page fit tile below. */}
       {(p.readings?.length ?? 0) > 0 ? (
         <div>
           <div style={{ fontSize: '10px', fontWeight: 600, color: colors.labelText, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '6px' }}>
@@ -130,12 +133,16 @@ export const DryingRunResult = ({ logId, onDone }: { logId: number; onDone: () =
       )}
 
       <div className="grid-3" style={{ gap: '10px' }}>
+        <Metric label="Marketable mass" value={kg(p.mass_out_kg)} hint="weighed out of the dryer" />
         <Metric label="Dry matter" value={kg(m.dry_matter_kg)} hint="conserved through drying" />
         <Metric label="Moisture ratio" value={m.moisture_ratio_final.toFixed(4)} hint={`${m.moisture_initial_db.toFixed(2)}% → ${m.moisture_final_db.toFixed(2)}% dry basis`} />
+        <Metric label="Newton k" value={`${m.newton_k.toFixed(6)} /h`} hint="single-term exponential fit" />
+        {/* The Page fit is a second model, not a footnote on the first — and it
+            is absent, not zero, when there were too few readings to fit it. */}
         <Metric
-          label="Newton k"
-          value={`${m.newton_k.toFixed(6)} /h`}
-          hint={m.page ? `Page: n=${m.page.n.toFixed(4)}, k=${m.page.k.toFixed(4)} (R²=${m.page.r2_linear.toFixed(4)})` : 'Page fit needs 3+ intermediate readings'}
+          label="Page fit"
+          value={m.page ? `n=${m.page.n.toFixed(4)} · k=${m.page.k.toFixed(4)}` : '—'}
+          hint={m.page ? `R² = ${m.page.r2_linear.toFixed(4)} · ${m.page.n_used} readings used` : 'Needs 3+ intermediate readings'}
         />
       </div>
 

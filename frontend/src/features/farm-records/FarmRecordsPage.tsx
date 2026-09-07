@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Plus, ClipboardList, Undo2 } from 'lucide-react';
+import { Plus, ClipboardList, Undo2, Droplets } from 'lucide-react';
 import { ledgerService } from '../../lib/apiClient';
 import type { OperationalLog } from '../../types/domain';
 import { colors } from '../../styles/theme';
 import { EmptyState } from '../../components/EmptyState';
 import { FarmRecordCreateForm } from './FarmRecordCreateForm';
 import { ReverseConfirmDialog } from './ReverseConfirmDialog';
+import { DryingRunResult } from './DryingRunResult';
 
 // Farm Records = the list of Operational Logs (each with its paired Financial
 // Transaction), plus a full create form for logging new activity.
@@ -22,6 +23,10 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
   // Filters. Empty string means "no filter" for both.
   const [cropFilter, setCropFilter] = useState('');
   const [activityFilter, setActivityFilter] = useState('');
+  // The bioprocess log whose metrics are on screen. Display only: the panel
+  // re-reads GET /bioprocess/{id}, which computes everything from the stored
+  // parameters, so browsing a run shows exactly what saving it showed.
+  const [metricsLogId, setMetricsLogId] = useState<number | null>(null);
 
   const fetchLogs = () => {
     ledgerService.getLogs()
@@ -189,6 +194,14 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
         <FarmRecordCreateForm isOnline={isOnline} onSaved={handleSaved} onClose={() => setShowForm(false)} />
       )}
 
+      {metricsLogId != null && (
+        <DryingRunResult
+          logId={metricsLogId}
+          title="Drying run"
+          onDone={() => setMetricsLogId(null)}
+        />
+      )}
+
       {reverseError && (
         <div style={{ background: 'rgba(192,57,43,0.08)', border: `0.5px solid ${colors.danger}`, borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: colors.danger }}>
           {reverseError}
@@ -280,6 +293,16 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
                       )}
                     </td>
                     <td style={{ ...td, textAlign: 'right' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
+                      {log.activity_type === 'bioprocess' && (
+                        <button
+                          onClick={() => setMetricsLogId(log.id)}
+                          title="Show the drying metrics for this run"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'transparent', border: `0.5px solid ${colors.borderInput}`, borderRadius: '7px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, color: colors.textBody, cursor: 'pointer' }}
+                        >
+                          <Droplets size={12} /> View metrics
+                        </button>
+                      )}
                       {canReverse(log) ? (
                         <button
                           onClick={() => { setReverseError(''); setPendingReversal(log); }}
@@ -289,8 +312,9 @@ const FarmRecordsPage = ({ isOnline, onRecordChange }: { isOnline: boolean; onRe
                           <Undo2 size={12} /> Reverse
                         </button>
                       ) : (
-                        <span style={{ fontSize: '11px', color: colors.textFaint }}>—</span>
+                        log.activity_type !== 'bioprocess' && <span style={{ fontSize: '11px', color: colors.textFaint }}>—</span>
                       )}
+                      </span>
                     </td>
                   </tr>
                 );

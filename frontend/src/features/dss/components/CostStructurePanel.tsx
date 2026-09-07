@@ -1,10 +1,18 @@
 import { Layers } from 'lucide-react';
 import { colors } from '../../../styles/theme';
 import { naira, pct, DASH } from '../format';
-import type { CropCostStructure, CropBreakEvenPrice } from '../../../types/domain';
+import type { CostStructure, CropBreakEvenPrice } from '../../../types/domain';
 
-// Cost structure for one crop: the four behaviour lines, and the classification
-// coverage that qualifies every one of them.
+// Cost structure for one crop OR for the whole farm: the four behaviour lines,
+// and the classification coverage that qualifies every one of them.
+//
+// THE PANEL DOES NOT KNOW WHICH IT IS SHOWING, and does not need to. It reads
+// only the cost lines, which mean the same thing either way, so the prop is the
+// plain CostStructure — the shape both the per-crop rows and the farm block
+// satisfy — and the copy below is worded so that it is true of both. Naming the
+// subject here would mean passing a label down for the sake of a sentence, and
+// a sentence that says "this crop" over a farm-wide total is worse than one
+// that says neither.
 //
 // COVERAGE IS TEXT, NOT A GAUGE, and that is a deliberate refusal rather than a
 // styling shortcut. A gauge — a dial, a progress bar, a ring — implies a target
@@ -30,7 +38,7 @@ const Line = ({ label, value, note, strong, muted }: {
 );
 
 export const CostStructurePanel = ({ structure, breakEven, card }: {
-  structure: CropCostStructure;
+  structure: CostStructure;
   // The allocated fixed line lives on the break-even response, not the cost
   // structure, because it is a derived overlay rather than anything recorded.
   // It is shown here anyway — the four lines only add up to a decision when the
@@ -86,15 +94,15 @@ export const CostStructurePanel = ({ structure, breakEven, card }: {
         </p>
         {coverage == null ? (
           <p style={{ fontSize: '11.5px', color: colors.textBody, marginTop: '5px', lineHeight: 1.6 }}>
-            No cost is recorded for this crop, so there is no coverage to report. This is not 0% — there is
+            No cost is recorded here, so there is no coverage to report. This is not 0% — there is
             nothing yet to classify.
           </p>
         ) : (
           <p style={{ fontSize: '11.5px', color: colors.textBody, marginTop: '5px', lineHeight: 1.6 }}>
-            <strong>{pct(coverage)}</strong> of this crop&rsquo;s recorded cost carries a cost subtype.
+            <strong>{pct(coverage)}</strong> of the recorded cost shown above carries a cost subtype.
             {coverage < 100
-              ? ' The rest is spending you recorded without saying what kind it was, so it sits inside the total cost figure and outside the cash one. Read the prices below against that.'
-              : ' Every recorded naira is classified, so both prices below rest on the full cost.'}
+              ? ' The rest is spending you recorded without saying what kind it was, so it sits inside the total cost figure and outside the cash one. Read every figure here against that.'
+              : ' Every recorded naira is classified, so the cash and total figures rest on the full cost.'}
           </p>
         )}
       </div>

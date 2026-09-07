@@ -292,6 +292,20 @@ const seedLog = (amount: number): OperationalLogCreate => ({
 })
 
 const card = { padding: '12px' }
+
+// EnterpriseEconomics opens farm-wide, and break-even prices are deliberately
+// not shown there — marketable mass belongs to a single crop, so the farm has
+// no divisor. The depreciation qualification asserted below lives in that
+// per-crop panel, so the crop has to be chosen before it is on screen. Which
+// view is open is unrelated to the staleness under test.
+const selectCrop = async (container: HTMLElement) => {
+  const select = await waitFor(() => {
+    const el = container.querySelector('#ee-crop') as HTMLSelectElement | null
+    if (!el) throw new Error('crop selector not rendered yet')
+    return el
+  })
+  fireEvent.change(select, { target: { value: 'maize' } })
+}
 const bodyText = () => document.body.textContent?.replace(/\s+/g, ' ') ?? ''
 
 const originalAdapter = api.defaults.adapter
@@ -364,7 +378,8 @@ describe('creating equipment invalidates the cached depreciation qualification',
     )
 
     // Seed: the sentence a user reads today, cached along with the response.
-    render(<EnterpriseEconomics card={card} />)
+    const seeded = render(<EnterpriseEconomics card={card} />)
+    await selectCrop(seeded.container)
     await waitFor(() => expect(bodyText()).toContain('1 of your 2 assets has no depreciation rate recorded'))
     cleanup()
 
@@ -378,7 +393,8 @@ describe('creating equipment invalidates the cached depreciation qualification',
 
     // The rendered qualification is the thing that goes stale, so it is the
     // thing asserted: without the purge this panel still reads "1 of your 2".
-    render(<EnterpriseEconomics card={card} />)
+    const reread = render(<EnterpriseEconomics card={card} />)
+    await selectCrop(reread.container)
     await waitFor(() => expect(bodyText()).toContain('2 of your 3 assets have no depreciation rate recorded'))
     expect(bodyText()).not.toContain('1 of your 2 assets')
   })

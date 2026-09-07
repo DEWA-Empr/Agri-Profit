@@ -28,6 +28,12 @@ import type {
 // of any filter, so a filtered fetch would buy nothing and cost a round trip
 // per crop switch on exactly the connection least able to afford one.
 
+// The farm-wide selection. A sentinel rather than a nullable crop because the
+// selector's value has to be a string either way, and a sentinel that cannot
+// collide with a crop name is cheaper to read than an empty string that also
+// has to mean "nothing chosen yet".
+const FARM = '__farm__';
+
 export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
   const [structure, setStructure] = useState<CostStructureResponse | null>(null);
   const [breakEven, setBreakEven] = useState<BreakEvenPriceResponse | null>(null);
@@ -35,7 +41,7 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
   const [baseline, setBaseline] = useState<YieldBaselineResponse | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  // ONLY the user's explicit choice is state. The crop actually shown is
+  // ONLY the user's explicit choice is state. The selection actually shown is
   // derived below — a default that lives in state has to be synchronised into
   // it by an effect, and an effect that sets state on data arriving is a
   // cascading render for something the render already knows.
@@ -60,28 +66,27 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
 
   const crops = useMemo(() => structure?.crops.map((c) => c.crop) ?? [], [structure]);
 
-  // Open on a crop that actually has both prices, falling back to the first
-  // crop alphabetically. Not to flatter the demo — every crop stays one click
-  // away in the selector, nulls and all — but because opening on a column of em
-  // dashes teaches the reader nothing about what the panels do, and the null
-  // case reads as breakage before it reads as an honest refusal.
-  const fallbackCrop = useMemo(() => {
-    const withPrice = breakEven?.crops.find((c) => c.break_even_price_cash_ngn_per_kg != null);
-    return withPrice?.crop ?? crops[0] ?? null;
-  }, [breakEven, crops]);
+  // The page opens farm-wide. Not a fallback but the default reading: the farm
+  // is the enterprise the reader came for, and any single crop picked for them
+  // would be an arbitrary one. The user's choice wins once made, guarded
+  // against a stale crop surviving a reload that no longer has it.
+  const selection = (chosen != null && (chosen === FARM || crops.includes(chosen))) ? chosen : FARM;
+  const isFarm = selection === FARM;
 
-  // The user's choice wins; the fallback fills in until they make one. Guarded
-  // against a stale choice surviving a reload that no longer has that crop.
-  const crop = (chosen != null && crops.includes(chosen)) ? chosen : fallbackCrop;
-
-  const selectedStructure = structure?.crops.find((c) => c.crop === crop);
-  const selectedBreakEven = breakEven?.crops.find((c) => c.crop === crop);
-  const selectedSensitivity = sensitivity?.crops.find((c) => c.crop === crop);
+  // Rendered AS RECEIVED from /dss/cost-structure. The farm block is the
+  // service's own aggregation over every crop's cost entries — not these panels
+  // re-adding the per-crop rows, which would average averages and produce a
+  // coverage and a ratio that are not the farm's.
+  const selectedStructure = isFarm
+    ? structure?.farm
+    : structure?.crops.find((c) => c.crop === selection);
+  const selectedBreakEven = isFarm ? undefined : breakEven?.crops.find((c) => c.crop === selection);
+  const selectedSensitivity = isFarm ? undefined : sensitivity?.crops.find((c) => c.crop === selection);
   // The yield baseline is keyed on crops that have recorded YIELD, so a
   // cost-only crop (tomato, sorghum) legitimately has no row here while it does
   // have a cost structure. Absent means absent — the panel is not rendered
   // rather than rendered full of dashes.
-  const selectedBaseline = baseline?.crops.find((c) => c.crop === crop);
+  const selectedBaseline = isFarm ? undefined : baseline?.crops.find((c) => c.crop === selection);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -117,18 +122,21 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
         </div>
       ) : (
         <>
-          {/* One selector for all three ledger panels. They are three views of
+          {/* One selector for all the ledger panels. They are several views of
               the same crop's costs and splitting the choice across them would
               let the reader compare a break-even price for one crop against a
-              cost structure for another. */}
+              cost structure for another. The farm-wide option leads because it
+              is the default, and because the crops under it are the parts of
+              the whole it names. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <label htmlFor="ee-crop" style={{ fontSize: '11px', fontWeight: 600, color: colors.labelText }}>Crop</label>
             <select
               id="ee-crop"
-              value={crop ?? ''}
+              value={selection}
               onChange={(e) => setChosen(e.target.value)}
               style={{ padding: '7px 10px', borderRadius: '7px', border: `1px solid ${colors.borderInput}`, fontSize: '12px', cursor: 'pointer', textTransform: 'capitalize', minWidth: '150px' }}
             >
+              <option value={FARM}>All crops (farm-wide)</option>
               {crops.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
             <span style={{ fontSize: '10.5px', color: colors.textFaint }}>
@@ -142,6 +150,17 @@ export const EnterpriseEconomics = ({ card }: { card: CSSProperties }) => {
             )}
             {selectedBreakEven && breakEven && (
               <BreakEvenPricePanel crop={selectedBreakEven} meta={breakEven} card={card} />
+            )}
+            {/* WHY THERE IS NO FARM-WIDE BREAK-EVEN PRICE. Not an omission to
+                be filled in later — the divisor does not exist. */}
+            {isFarm && (
+              <div style={card}>
+                <p style={{ fontSize: '11.5px', color: colors.textBody, lineHeight: 1.65 }}>
+                  Break-even prices are shown per crop. Both prices are per kilogram of marketable output, and
+                  marketable mass belongs to a single crop — cowpea and maize cannot be added into one saleable
+                  mass. Select a crop above to see its break-even prices.
+                </p>
+              </div>
             )}
           </div>
 
