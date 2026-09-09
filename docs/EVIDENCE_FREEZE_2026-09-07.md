@@ -167,9 +167,22 @@ Two consequences follow, and both matter for how the figures may be cited:
    commit. Any attempt to regenerate these figures from the previous baseline
    will produce different screens. `598eab0` is the only commit from which they
    reproduce.
-2. **The database state and sign-in are unchanged** from the 29 August freeze
-   §4: the live database in the condition described there, signed in as
-   **farm 26**. The frozen commit changes presentation, not data.
+2. **Farm 26 and the sign-in are unchanged; the wider database is not.**
+   Signed in as **farm 26**, whose last write was **24 August 2026** — so every
+   figure read from that farm is the same at this commit as at the 29 August
+   freeze. The database as a whole has moved since freeze §4, and this document
+   previously stated otherwise in error. `docs/EVIDENCE_CAPTURE_2026-09-07.md`
+   §2 records the census on 7 September 2026: five of nine rows changed —
+   `farms` 14 → 15, `users` 13 → 14, `operational_logs` 109 → 110,
+   `financial_transactions` 109 → 110, `share_tokens` 10 → 12. `equipment` (3),
+   `maintenance_logs` (1), `alembic_version` (`b9e5f30c74a1`) and unpaired
+   operational logs (0) are unchanged. The entire delta is one new farm,
+   **30, `Miller Farms`**, created 2026-09-01 17:50:20 UTC and holding a single
+   `BIOPROCESS` / `DRYING` maize log — see capture §2.1, which also shows every
+   farm present on 25 August carrying an identical count, farm 26 included at
+   28 logs. **Cite the census at its own date, 29 August 2026 (freeze §4); cite
+   farm 26's figures at either.** The frozen commit itself changes presentation,
+   not data.
 
 ---
 
