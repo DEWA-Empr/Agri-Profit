@@ -62,6 +62,10 @@ screenshots/
 
 # Documents (write-ups / exports — not source)
 *.docx
+# ...except the live thesis working file, which is version-controlled
+!Thesis_Ch1-5_with_figures.docx
+# Word lock files are never source, even for the tracked file
+~$*.docx
 
 # Generated standalone HTML export
 AgriProfit-standalone.html
